@@ -11,6 +11,8 @@ const LINKS = [
   { href: '/inventory', label: 'Inventory' },
   { href: '/marketplace', label: 'Marketplace' },
   { href: '/trades', label: 'Trades' },
+  { href: '/agora', label: 'Agora' },
+  { href: '/veyra', label: 'Veyra' },
   { href: '/events', label: 'Events' },
   { href: '/profile', label: 'Profile' },
   { href: '/settings', label: 'Settings' },
