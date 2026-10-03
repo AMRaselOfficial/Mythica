@@ -113,6 +113,7 @@ img {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .brand {
@@ -1011,6 +1012,104 @@ textarea.input {
   padding: 2rem 1rem 3rem;
   position: relative;
   z-index: 1;
+}
+
+/* ---------- Responsive: phones & small tablets ---------- */
+
+/* Guard against accidental horizontal scroll (does not break sticky nav). */
+html,
+body {
+  overflow-x: clip;
+}
+
+@media (max-width: 719px) {
+  .page {
+    padding: 0.75rem 0.75rem 3rem;
+  }
+
+  .hero {
+    padding: 2.25rem 0.5rem 1.75rem;
+  }
+
+  .form-card {
+    padding: 1.25rem;
+  }
+
+  /* Nav: brand + account stay on the first row; the eight section links
+     become a horizontally swipeable strip instead of a tall wrapped block. */
+  .nav-inner {
+    row-gap: 0.35rem;
+  }
+
+  .nav-links {
+    order: 3;
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 0.15rem;
+  }
+
+  .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-links a {
+    white-space: nowrap;
+  }
+
+  /* Item grids: comfortable two-column cards on phones. */
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.75rem;
+  }
+
+  /* Hunt theater fits small screens. */
+  .hunt-stage {
+    min-height: 300px;
+    padding: 1.5rem 0.75rem;
+  }
+
+  /* Hero calls-to-action stack full-width for easy tapping. */
+  .hero-cta .btn {
+    flex: 1 1 100%;
+  }
+
+  /* Stat tiles share the row evenly on narrow screens. */
+  .stat {
+    flex: 1 1 40%;
+    min-width: 0;
+  }
+
+  /* Tighter row items so thumbs + text + actions fit. */
+  .row-item {
+    gap: 0.65rem;
+    padding: 0.7rem 0.8rem;
+  }
+
+  .row-item .grow {
+    min-width: 0;
+  }
+}
+
+/* Touch usability: comfortable tap targets on touch devices. */
+@media (pointer: coarse) {
+  .nav-links a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .btn-sm,
+  .chip {
+    min-height: 44px;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+  }
 }
 
 /* ---------- Reduced motion ---------- */
