@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   collection,
   limit,
+  onSnapshot,
   orderBy,
   query,
   startAfter,
@@ -292,6 +293,7 @@ function CreateListing({ onListed }) {
           <h3 className="serif" style={{ marginTop: 0 }}>
             List an item for sale
           </h3>
+          {error && <ErrorNotice message={error} />}
           {inv.length === 0 ? (
             <div style={{ color: 'var(--ink-dim)' }}>
               <p style={{ margin: '0 0 0.5rem' }}>You own nothing sellable right now.</p>
@@ -331,7 +333,6 @@ function CreateListing({ onListed }) {
                     onChange={(e) => setPrice(e.target.value)} />
                 </div>
               </div>
-              {error && <ErrorNotice message={error} />}
               <div style={{ display: 'flex', gap: '0.6rem' }}>
                 <button className="btn btn-primary" type="submit" disabled={busy}>
                   {busy ? 'Listing…' : 'List for Sale'}
