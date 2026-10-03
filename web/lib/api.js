@@ -83,6 +83,33 @@ async function post(path, body) {
   return data;
 }
 
+async function get(path) {
+  const base = getApiUrl();
+  if (!base) throw new ApiError('offline', 'Game server is not configured.');
+  const token = await freshIdToken();
+  let res;
+  try {
+    res = await fetch(`${base}${path}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    throw new ApiError('network', 'Could not reach the game server. Check your connection.');
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* ignore */
+  }
+  checkBanned(res, data);
+  if (!res.ok || (data && data.ok === false)) {
+    const code = (data && data.error) || `http_${res.status}`;
+    throw new ApiError(code, friendlyMessage(code, data), data);
+  }
+  return data;
+}
+
 function friendlyMessage(code, data) {
   switch (code) {
     case 'cooldown':
@@ -140,6 +167,8 @@ export const api = {
   tradesComplete: (tradeId, idempotencyKey) =>
     post('/api/trades/complete', { tradeId, idempotencyKey }),
   upgrade: (itemId, idempotencyKey) => post('/api/upgrade', { itemId, idempotencyKey }),
+  playerMe: () => get('/api/player/me'),
+  playerByCode: (code) => get(`/api/players/by-code/${encodeURIComponent(code)}`),
 };
 
 export function newIdempotencyKey() {
