@@ -49,9 +49,9 @@ router.post('/redeem', async (req, res) => {
       const rc = codeSnap.data();
       if (!rc.active) return { error: 'inactive' };
       if (rc.expiresAt && now > rc.expiresAt) return { error: 'expired' };
+      if (claimSnap.exists) return { error: 'already_redeemed' };
       const max = Math.max(0, Math.floor(rc.maxRedemptions || 0));
       if (max > 0 && (rc.redeemedCount || 0) >= max) return { error: 'limit_reached' };
-      if (claimSnap.exists) return { error: 'already_redeemed' };
       if (!playerSnap.exists) return { error: 'not_found' };
 
       const player = playerSnap.data();
