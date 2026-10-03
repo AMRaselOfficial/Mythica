@@ -6,7 +6,7 @@
  */
 const express = require('express');
 const { db } = require('../lib/db');
-const { ensurePlayerCode, uidByCode } = require('../lib/playerCode');
+const { ensurePlayerCode, ensurePlayerIdentity, uidByCode } = require('../lib/playerCode');
 
 const router = express.Router();
 
@@ -21,7 +21,7 @@ function toMillis(v) {
 router.get('/player/me', async (req, res) => {
   try {
     const uid = req.uid;
-    const code = await ensurePlayerCode(uid);
+    const code = await ensurePlayerIdentity(uid);
     const snap = await db.collection('players').doc(uid).get();
     if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
     const p = snap.data();

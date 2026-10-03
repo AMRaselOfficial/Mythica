@@ -14,8 +14,9 @@ const { bumpHuntEventProgress } = require('../lib/events');
 
 const router = express.Router();
 
-async function newPlayer(now) {
+async function newPlayer(now, uid) {
   return {
+    uid: uid || '',
     displayName: '',
     email: '',
     playerCode: await generateUniqueCode(),
@@ -47,7 +48,7 @@ router.post('/hunt', async (req, res) => {
       const playerRef = db.collection('players').doc(uid);
       const snap = await tx.get(playerRef);
       const isNew = !snap.exists;
-      const player = isNew ? await newPlayer(now) : snap.data();
+      const player = isNew ? await newPlayer(now, uid) : snap.data();
 
       const cd = contentApi.cooldownMs();
       const elapsed = now - (player.lastHuntAt || 0);
