@@ -84,6 +84,7 @@ async function requireAuth(req, res, next) {
   try {
     a = await authenticate(req);
   } catch (e) {
+    console.error('token verification failed:', (e && e.message) || e);
     if (e && e.code === 'ADMIN_UNAVAILABLE') {
       return res.status(503).json({ ok: false, error: 'auth_unavailable' });
     }
@@ -101,6 +102,7 @@ async function requireAdmin(req, res, next) {
     try {
       a = await authenticate(req);
     } catch (e) {
+      console.error('token verification failed:', (e && e.message) || e);
       if (e && e.code === 'ADMIN_UNAVAILABLE') {
         return res.status(503).json({ ok: false, error: 'auth_unavailable' });
       }
