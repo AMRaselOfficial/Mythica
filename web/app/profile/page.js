@@ -10,6 +10,7 @@ import { asset, link } from '../../lib/paths.js';
 import { xpProgress } from '../../lib/xp.js';
 import { sfx } from '../../lib/audio.js';
 import FriendsSection from '../components/FriendsSection.js';
+import RedeemSection from '../components/RedeemSection.js';
 
 export default function ProfilePage() {
   return (
@@ -203,6 +204,8 @@ function ProfileInner() {
       </div>
 
       <FriendsSection />
+
+      <RedeemSection />
     </div>
   );
 }
