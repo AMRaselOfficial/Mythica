@@ -1,5 +1,13 @@
----
-
+# Builds the Mythica Next.js static site and deploys it to GitHub Pages.
+# Required repository secrets (Settings → Secrets and actions → Actions):
+#   NEXT_PUBLIC_FIREBASE_API_KEY
+#   NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+#   NEXT_PUBLIC_FIREBASE_PROJECT_ID
+#   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+#   NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+#   NEXT_PUBLIC_FIREBASE_APP_ID
+#   NEXT_PUBLIC_API_URL   (e.g. https://mythica-server.onrender.com)
+# Also enable Pages once: repo Settings → Pages → Source: "GitHub Actions".
 name: Deploy Mythica to GitHub Pages
 
 on:
@@ -66,4 +74,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
----
