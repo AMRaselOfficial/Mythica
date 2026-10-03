@@ -293,7 +293,17 @@ function CreateListing({ onListed }) {
             List an item for sale
           </h3>
           {inv.length === 0 ? (
-            <p style={{ color: 'var(--ink-dim)' }}>You own nothing sellable right now.</p>
+            <div style={{ color: 'var(--ink-dim)' }}>
+              <p style={{ margin: '0 0 0.5rem' }}>You own nothing sellable right now.</p>
+              <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem' }}>
+                Every item you find on hunts can be listed for sale — Moss Wisp, Ember Fox,
+                Thornblade, and Starfall Hammer. Head out on a hunt to stock your pack, then
+                come back here to list your finds.
+              </p>
+              <a className="btn btn-primary btn-sm" href={asset('/hunt')}>
+                Go Hunting
+              </a>
+            </div>
           ) : (
             <>
               <div className="field">
