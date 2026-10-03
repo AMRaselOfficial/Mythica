@@ -43,13 +43,8 @@ router.post('/hunt', async (req, res) => {
       const now = Date.now();
       const playerRef = db.collection('players').doc(uid);
       const snap = await tx.get(playerRef);
-      let player;
-      if (!snap.exists) {
-        player = newPlayer(now);
-        tx.set(playerRef, player);
-      } else {
-        player = snap.data();
-      }
+      const isNew = !snap.exists;
+      const player = isNew ? newPlayer(now) : snap.data();
 
       const cd = contentApi.cooldownMs();
       const elapsed = now - (player.lastHuntAt || 0);
@@ -61,23 +56,37 @@ router.post('/hunt', async (req, res) => {
       const applied = applyXp(player, roll.xpGained, contentApi.content.xpCurve);
       const petals = (player.petals ?? 0) + roll.petalsFound;
 
-      tx.update(playerRef, {
+      // Firestore transactions require ALL reads before ALL writes, so the
+      // inventory read is hoisted here ahead of any write.
+      let drop = null;
+      let invRef = null;
+      let invSnap = null;
+      let item = null;
+      if (roll.dropItemId) {
+        item = contentApi.getItem(roll.dropItemId);
+        invRef = db
+          .collection('inventories')
+          .doc(uid)
+          .collection('items')
+          .doc(roll.dropItemId);
+        invSnap = await tx.get(invRef);
+      }
+
+      // ---- Writes only from this point on. ----
+      const playerUpdate = {
         lastHuntAt: now,
         level: applied.level,
         xp: applied.xp,
         petals,
         updatedAt: now,
-      });
+      };
+      if (isNew) {
+        tx.set(playerRef, { ...player, ...playerUpdate });
+      } else {
+        tx.update(playerRef, playerUpdate);
+      }
 
-      let drop = null;
       if (roll.dropItemId) {
-        const item = contentApi.getItem(roll.dropItemId);
-        const invRef = db
-          .collection('inventories')
-          .doc(uid)
-          .collection('items')
-          .doc(roll.dropItemId);
-        const invSnap = await tx.get(invRef);
         let quantity;
         if (invSnap.exists) {
           quantity = (invSnap.data().quantity || 0) + 1;

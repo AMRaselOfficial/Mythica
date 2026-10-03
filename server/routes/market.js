@@ -99,6 +99,14 @@ router.post('/market/purchase', async (req, res) => {
       if (err) return { error: err };
 
       const now = Date.now();
+      // Firestore transactions require ALL reads before ALL writes: hoist the
+      // seller and buyer-inventory reads ahead of the buyer write below.
+      const sellerRef = db.collection('players').doc(listing.sellerUid);
+      const sSnap = await tx.get(sellerRef);
+      const invRef = db.collection('inventories').doc(uid).collection('items').doc(listing.itemId);
+      const iSnap = await tx.get(invRef);
+
+      // ---- Writes only from this point on. ----
       const buyerPetals = (buyer ? buyer.petals ?? contentApi.startingPetals() : contentApi.startingPetals()) - listing.price;
       if (bSnap.exists) {
         tx.update(buyerRef, { petals: buyerPetals, updatedAt: now });
@@ -106,16 +114,12 @@ router.post('/market/purchase', async (req, res) => {
         tx.set(buyerRef, { ...newPlayer(now), petals: buyerPetals });
       }
 
-      const sellerRef = db.collection('players').doc(listing.sellerUid);
-      const sSnap = await tx.get(sellerRef);
       if (sSnap.exists) {
         tx.update(sellerRef, { petals: (sSnap.data().petals ?? 0) + listing.price, updatedAt: now });
       } else {
         tx.set(sellerRef, { ...newPlayer(now), petals: contentApi.startingPetals() + listing.price });
       }
 
-      const invRef = db.collection('inventories').doc(uid).collection('items').doc(listing.itemId);
-      const iSnap = await tx.get(invRef);
       if (iSnap.exists) {
         tx.update(invRef, { quantity: (iSnap.data().quantity || 0) + listing.quantity });
       } else {
@@ -172,11 +176,15 @@ router.post('/market/cancel', async (req, res) => {
       if (listing.status !== 'active') return { error: 'bad_state' };
 
       const now = Date.now();
+      // Firestore transactions require ALL reads before ALL writes: hoist the
+      // inventory read ahead of the listing-status write below.
+      const invRef = db.collection('inventories').doc(uid).collection('items').doc(listing.itemId);
+      const iSnap = await tx.get(invRef);
+
+      // ---- Writes only from this point on. ----
       tx.update(listingRef, { status: 'canceled', canceledAt: now });
 
       // Restore the escrowed quantity to the seller's inventory.
-      const invRef = db.collection('inventories').doc(uid).collection('items').doc(listing.itemId);
-      const iSnap = await tx.get(invRef);
       if (iSnap.exists) {
         tx.update(invRef, { quantity: (iSnap.data().quantity || 0) + listing.quantity });
       } else {

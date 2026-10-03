@@ -22,15 +22,26 @@ async function qtyOf(tx, uid, itemId) {
   return snap.exists ? snap.data().quantity || 0 : 0;
 }
 
-/** Adjust inventory by delta (delta may be negative). Creates the doc if needed. */
-async function adjustInv(tx, uid, itemId, delta, now) {
+/** Read an inventory doc snapshot (read phase). */
+async function readInvSnap(tx, uid, itemId) {
+  return tx.get(invRef(uid, itemId));
+}
+
+/** Apply an inventory adjustment from a pre-read snapshot (write phase). */
+function writeInvAdjust(tx, uid, itemId, snap, delta, now) {
   const ref = invRef(uid, itemId);
-  const snap = await tx.get(ref);
   if (snap.exists) {
     tx.update(ref, { quantity: (snap.data().quantity || 0) + delta });
   } else {
     tx.set(ref, { quantity: delta, upgradeLevel: 0, obtainedAt: now, favorite: false });
   }
+}
+
+/** Adjust inventory by delta (delta may be negative). Creates the doc if needed.
+ *  For single adjustments outside multi-write transactions. */
+async function adjustInv(tx, uid, itemId, delta, now) {
+  const snap = await readInvSnap(tx, uid, itemId);
+  writeInvAdjust(tx, uid, itemId, snap, delta, now);
 }
 
 router.post('/trades/complete', async (req, res) => {
@@ -56,11 +67,24 @@ router.post('/trades/complete', async (req, res) => {
       if (err) return { error: err };
 
       const now = Date.now();
+      // Firestore transactions require ALL reads before ALL writes: hoist the
+      // four inventory reads ahead of the trade-status write below.
+      const swap = [
+        [trade.offeredBy, trade.offerItemId, -trade.offerQty],
+        [trade.offeredBy, trade.wantItemId, trade.wantQty],
+        [trade.offeredTo, trade.wantItemId, -trade.wantQty],
+        [trade.offeredTo, trade.offerItemId, trade.offerQty],
+      ];
+      const swapSnaps = [];
+      for (const [swapUid, itemId] of swap) {
+        swapSnaps.push(await readInvSnap(tx, swapUid, itemId));
+      }
+
+      // ---- Writes only from this point on. ----
       // Atomic swap: offeredBy gives offerItemId, receives wantItemId (and vice versa).
-      await adjustInv(tx, trade.offeredBy, trade.offerItemId, -trade.offerQty, now);
-      await adjustInv(tx, trade.offeredBy, trade.wantItemId, trade.wantQty, now);
-      await adjustInv(tx, trade.offeredTo, trade.wantItemId, -trade.wantQty, now);
-      await adjustInv(tx, trade.offeredTo, trade.offerItemId, trade.offerQty, now);
+      swap.forEach(([swapUid, itemId, delta], i) => {
+        writeInvAdjust(tx, swapUid, itemId, swapSnaps[i], delta, now);
+      });
 
       tx.update(tradeRef, { status: 'completed', completedAt: now });
 
