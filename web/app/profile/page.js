@@ -62,6 +62,26 @@ function ProfileInner() {
           <> · <span style={{ color: 'var(--danger)' }}>status: {player.accountStatus}</span></>
         )}
       </p>
+      {player?.playerCode && (
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', padding: '0.75rem 1rem' }}>
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--ink-dim)' }}>Your traveler code — share it to trade</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, letterSpacing: '0.15em', color: 'var(--gold-soft)' }}>
+              {player.playerCode}
+            </div>
+          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ marginLeft: 'auto' }}
+            onClick={() => {
+              navigator.clipboard?.writeText(player.playerCode);
+              sfx.click();
+            }}
+          >
+            Copy
+          </button>
+        </div>
+      )}
 
       <div className="stat-row">
         <div className="stat">
