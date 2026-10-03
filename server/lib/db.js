@@ -82,17 +82,25 @@ class FakeCollectionRef {
 class FakeTransaction {
   constructor(store) {
     this._store = store;
+    this._wrote = false;
   }
   get(ref) {
+    // Mirror real Firestore: all reads must precede all writes.
+    if (this._wrote) {
+      throw new Error('Firestore transactions require all reads to be executed before all writes.');
+    }
     return ref.get();
   }
   set(ref, data, opts) {
+    this._wrote = true;
     return ref.set(data, opts);
   }
   update(ref, data) {
+    this._wrote = true;
     return ref.update(data);
   }
   delete(ref) {
+    this._wrote = true;
     return ref.delete();
   }
 }
