@@ -11,6 +11,8 @@
  * GET  /api/admin/users/:uid
  * POST /api/admin/users/:uid/ban
  * POST /api/admin/users/:uid/unban
+ * POST /api/admin/users/:uid/inventory/add    { itemId, quantity }
+ * POST /api/admin/users/:uid/inventory/remove { itemId, quantity }
  */
 const express = require('express');
 const { db, USE_FAKE, loadAdmin } = require('../lib/db');
@@ -168,6 +170,8 @@ router.get('/admin/users/:uid', async (req, res) => {
         rarity: item ? item.rarity : 'unknown',
         quantity: data.quantity || 0,
         upgradeLevel: data.upgradeLevel || 0,
+        obtainedAt: toMillis(data.obtainedAt),
+        favorite: !!data.favorite,
       };
     });
 
@@ -241,6 +245,76 @@ router.post('/admin/users/:uid/unban', async (req, res) => {
     res.json({ ok: true, accountStatus: 'active' });
   } catch (e) {
     console.error('POST /api/admin/users/:uid/unban failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Admin: add items to a player's inventory.
+ *  POST /api/admin/users/:uid/inventory/add { itemId, quantity } */
+router.post('/admin/users/:uid/inventory/add', async (req, res) => {
+  try {
+    const targetUid = req.params.uid;
+    const { itemId, quantity } = req.body || {};
+    const qty = Math.floor(Number(quantity) || 0);
+    if (!itemId || typeof itemId !== 'string' || qty <= 0 || qty > 9999) {
+      return res.status(400).json({ ok: false, error: 'invalid_input' });
+    }
+    const item = contentApi.getItem(itemId);
+    if (!item) return res.status(400).json({ ok: false, error: 'unknown_item' });
+
+    const pRef = db.collection('players').doc(targetUid);
+    if (!(await pRef.get()).exists) return res.status(404).json({ ok: false, error: 'not_found' });
+
+    const invRef = db.collection('inventories').doc(targetUid).collection('items').doc(itemId);
+    const now = Date.now();
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(invRef);
+      if (snap.exists) {
+        const cur = snap.data().quantity || 0;
+        tx.update(invRef, { quantity: cur + qty, updatedAt: now });
+      } else {
+        tx.set(invRef, { quantity: qty, upgradeLevel: 0, obtainedAt: now, favorite: false });
+      }
+    });
+    await safeLog({ uid: targetUid, type: 'admin_grant_item', details: { itemId, quantity: qty, byUid: req.uid } });
+    res.json({ ok: true, itemId, quantityAdded: qty });
+  } catch (e) {
+    console.error('POST /api/admin/users/:uid/inventory/add failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Admin: remove items from a player's inventory.
+ *  POST /api/admin/users/:uid/inventory/remove { itemId, quantity } */
+router.post('/admin/users/:uid/inventory/remove', async (req, res) => {
+  try {
+    const targetUid = req.params.uid;
+    const { itemId, quantity } = req.body || {};
+    const qty = Math.floor(Number(quantity) || 0);
+    if (!itemId || typeof itemId !== 'string' || qty <= 0 || qty > 9999) {
+      return res.status(400).json({ ok: false, error: 'invalid_input' });
+    }
+    const pRef = db.collection('players').doc(targetUid);
+    if (!(await pRef.get()).exists) return res.status(404).json({ ok: false, error: 'not_found' });
+
+    const invRef = db.collection('inventories').doc(targetUid).collection('items').doc(itemId);
+    const result = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(invRef);
+      if (!snap.exists) return { error: 'not_owned' };
+      const cur = snap.data().quantity || 0;
+      const remaining = cur - qty;
+      if (remaining > 0) {
+        tx.update(invRef, { quantity: remaining, updatedAt: Date.now() });
+      } else {
+        tx.delete(invRef);
+      }
+      return { ok: true, removed: Math.min(qty, cur), remaining: Math.max(0, remaining) };
+    });
+    if (result.error) return res.status(400).json({ ok: false, error: result.error });
+    await safeLog({ uid: targetUid, type: 'admin_remove_item', details: { itemId, quantity: result.removed, byUid: req.uid } });
+    res.json({ ok: true, itemId, ...result });
+  } catch (e) {
+    console.error('POST /api/admin/users/:uid/inventory/remove failed:', e);
     res.status(500).json({ ok: false, error: 'internal' });
   }
 });
