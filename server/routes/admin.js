@@ -471,4 +471,174 @@ router.delete('/admin/redeem-codes/:code', async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------ *
+ * Event manager — create / edit / delete events and inspect joins.
+ *
+ * GET    /api/admin/events
+ * POST   /api/admin/events
+ *          { title, description, banner, startAt, endAt, active, featured,
+ *            type: 'hunt_count'|'invite_friends'|'minigame', goal,
+ *            rewards: { petals, xp, items:[{itemId,quantity}] } }
+ * PATCH  /api/admin/events/:id      (any of the above fields)
+ * DELETE /api/admin/events/:id      (also deletes its joins)
+ * GET    /api/admin/events/:id/joins  (who joined + per-user progress)
+ * ------------------------------------------------------------------ */
+
+const {
+  normalizeEventInput,
+  publicEvent,
+  whereEquals,
+} = require('../lib/events');
+
+function slugify(title) {
+  const s = String(title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  return (s || 'event') + '-' + Date.now().toString(36);
+}
+
+router.get('/admin/events', async (req, res) => {
+  try {
+    const docs = await listDocs('events');
+    const events = [];
+    for (const { id, data } of docs) {
+      const joins = await whereEquals(db, USE_FAKE, 'eventJoins', 'eventId', id);
+      let completed = 0;
+      let claimed = 0;
+      for (const j of joins) {
+        if (j.data.completed) completed += 1;
+        if (j.data.claimed) claimed += 1;
+      }
+      events.push({
+        ...publicEvent(id, data),
+        joinCount: joins.length,
+        completedCount: completed,
+        claimedCount: claimed,
+      });
+    }
+    events.sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
+    res.json({ ok: true, events });
+  } catch (e) {
+    console.error('GET /api/admin/events failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.post('/admin/events', async (req, res) => {
+  try {
+    const { event, error } = normalizeEventInput(req.body);
+    if (error) return res.status(400).json({ ok: false, error });
+    const id = slugify(event.title);
+    const now = Date.now();
+    await db.collection('events').doc(id).set({
+      ...event,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: req.uid,
+    });
+    await safeLog({ uid: req.uid, type: 'admin_event_create', details: { id, title: event.title, byUid: req.uid } });
+    res.json({ ok: true, id, event: publicEvent(id, event) });
+  } catch (e) {
+    console.error('POST /api/admin/events failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.patch('/admin/events/:id', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').slice(0, 80);
+    const ref = db.collection('events').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+
+    // Merge with existing, then validate the whole thing.
+    const merged = { ...snap.data(), ...(req.body || {}) };
+    // Don't let id/createdAt be overwritten through the body.
+    delete merged.createdAt;
+    const { event, error } = normalizeEventInput(merged);
+    if (error) return res.status(400).json({ ok: false, error });
+
+    await ref.update({ ...event, updatedAt: Date.now() });
+    await safeLog({ uid: req.uid, type: 'admin_event_update', details: { id, byUid: req.uid } });
+    res.json({ ok: true, id, event: publicEvent(id, event) });
+  } catch (e) {
+    console.error('PATCH /api/admin/events/:id failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.delete('/admin/events/:id', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').slice(0, 80);
+    const ref = db.collection('events').doc(id);
+    if (!(await ref.get()).exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    await ref.delete();
+    // Remove joins too (bounded).
+    const joins = await whereEquals(db, USE_FAKE, 'eventJoins', 'eventId', id);
+    for (const j of joins.slice(0, 5000)) {
+      await db.collection('eventJoins').doc(j.id).delete();
+    }
+    await safeLog({ uid: req.uid, type: 'admin_event_delete', details: { id, byUid: req.uid } });
+    res.json({ ok: true, id });
+  } catch (e) {
+    console.error('DELETE /api/admin/events/:id failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.get('/admin/events/:id/joins', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').slice(0, 80);
+    const eventSnap = await db.collection('events').doc(id).get();
+    if (!eventSnap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+
+    const joins = await whereEquals(db, USE_FAKE, 'eventJoins', 'eventId', id);
+    const rows = [];
+    for (const j of joins.slice(0, 500)) {
+      const d = j.data;
+      let level = null;
+      let displayName = d.displayName || 'Traveler';
+      try {
+        const prof = await db.collection('publicProfiles').doc(d.uid).get();
+        if (prof.exists) {
+          level = prof.data().level ?? null;
+          displayName = prof.data().displayName || displayName;
+        }
+      } catch {
+        /* non-fatal */
+      }
+      rows.push({
+        uid: d.uid,
+        displayName,
+        level,
+        joinedAt: d.joinedAt || 0,
+        progress: d.progress || 0,
+        completed: !!d.completed,
+        completedAt: d.completedAt || 0,
+        claimed: !!d.claimed,
+        claimedAt: d.claimedAt || 0,
+      });
+    }
+    rows.sort((a, b) => (b.progress || 0) - (a.progress || 0));
+
+    const totalProgress = rows.reduce((s, r) => s + (r.progress || 0), 0);
+    res.json({
+      ok: true,
+      event: publicEvent(id, eventSnap.data()),
+      stats: {
+        joined: rows.length,
+        completed: rows.filter((r) => r.completed).length,
+        claimed: rows.filter((r) => r.claimed).length,
+        avgProgress: rows.length ? Math.round((totalProgress / rows.length) * 10) / 10 : 0,
+      },
+      joins: rows,
+    });
+  } catch (e) {
+    console.error('GET /api/admin/events/:id/joins failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
 module.exports = router;

@@ -5,11 +5,12 @@
  * roll, apply, commit — THEN sleep the theater delay and respond.
  */
 const express = require('express');
-const { db } = require('../lib/db');
+const { db, USE_FAKE } = require('../lib/db');
 const { activityEntry } = require('../lib/activity');
 const contentApi = require('../lib/content');
 const { rollHunt, applyXp } = require('../lib/game');
 const { generateUniqueCode, ensurePlayerCode } = require('../lib/playerCode');
+const { bumpHuntEventProgress } = require('../lib/events');
 
 const router = express.Router();
 
@@ -152,6 +153,10 @@ router.post('/hunt', async (req, res) => {
 
     // Theater delay happens AFTER the transaction commits.
     await sleep(theaterMs());
+
+    // Best-effort: progress any joined hunt_count events. Never blocks the response.
+    bumpHuntEventProgress(db, USE_FAKE, uid).catch(() => {});
+
     return res.json(out);
   } catch (e) {
     console.error('POST /api/hunt failed:', e);

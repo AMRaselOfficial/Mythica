@@ -14,8 +14,7 @@
  */
 const express = require('express');
 const { db } = require('../lib/db');
-const { applyXp } = require('../lib/game');
-const contentApi = require('../lib/content');
+const { prepareItemGrants, applyRewardWrites } = require('../lib/rewards');
 const { logActivity } = require('../lib/activity');
 
 const router = express.Router();
@@ -55,72 +54,26 @@ router.post('/redeem', async (req, res) => {
       if (!playerSnap.exists) return { error: 'not_found' };
 
       const player = playerSnap.data();
-      const petalsGain = Math.max(0, Math.floor(rc.petals || 0));
-      const xpGain = Math.max(0, Math.floor(rc.xp || 0));
       const items = Array.isArray(rc.items) ? rc.items : [];
-
-      const applied = applyXp(player, xpGain, contentApi.content.xpCurve);
-      const newPetals = (player.petals || 0) + petalsGain;
 
       // Firestore transactions require ALL reads before ALL writes, so the
       // inventory reads are hoisted here ahead of any write.
-      const invReads = [];
-      for (const it of items) {
-        const itemId = String((it && it.itemId) || '');
-        const qty = Math.floor(Number((it && it.quantity) || 0));
-        const item = contentApi.getItem(itemId);
-        if (!item || qty <= 0) continue;
-        const invRef = db.collection('inventories').doc(uid).collection('items').doc(itemId);
-        const invSnap = await tx.get(invRef);
-        invReads.push({ item, itemId, qty, invRef, invSnap });
-      }
+      const invReads = await prepareItemGrants(db, tx, uid, items);
 
       // ---- Writes only from this point on. ----
-      tx.update(playerRef, {
-        petals: newPetals,
-        level: applied.level,
-        xp: applied.xp,
-        updatedAt: now,
+      const rewards = applyRewardWrites(db, tx, {
+        uid,
+        player,
+        petals: rc.petals,
+        xp: rc.xp,
+        invReads,
+        now,
       });
-
-      const grantedItems = [];
-      for (const { item, itemId, qty, invRef, invSnap } of invReads) {
-        if (invSnap.exists) {
-          tx.update(invRef, {
-            quantity: (invSnap.data().quantity || 0) + qty,
-            updatedAt: now,
-          });
-        } else {
-          tx.set(invRef, { quantity: qty, upgradeLevel: 0, obtainedAt: now, favorite: false });
-        }
-        grantedItems.push({ itemId, name: item.name, quantity: qty });
-      }
 
       tx.set(claimRef, { code, uid, redeemedAt: now });
       tx.update(codeRef, { redeemedCount: (rc.redeemedCount || 0) + 1, updatedAt: now });
 
-      // Public profile rides along (level may have changed).
-      tx.set(
-        db.collection('publicProfiles').doc(uid),
-        {
-          displayName: player.displayName || 'Traveler',
-          level: applied.level,
-          playerCode: player.playerCode || null,
-          updatedAt: now,
-        },
-        { merge: true }
-      );
-
-      return {
-        ok: true,
-        rewards: {
-          petals: petalsGain,
-          xp: xpGain,
-          level: applied.level,
-          leveledUp: applied.leveledUp,
-          items: grantedItems,
-        },
-      };
+      return { ok: true, rewards };
     });
 
     if (out.error) {
