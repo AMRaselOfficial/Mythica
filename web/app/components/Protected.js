@@ -2,7 +2,6 @@
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext.js';
-import { link } from '../../lib/paths.js';
 
 // Wraps protected pages: shows a friendly "not configured" or signed-out
 // state, and redirects to /login when signed out.
@@ -11,7 +10,7 @@ export default function Protected({ children }) {
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && configured && !user) router.replace(link('/login'));
+    if (!loading && configured && !user) router.replace('/login');
   }, [loading, configured, user, router]);
 
   if (loading) {
