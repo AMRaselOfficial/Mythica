@@ -1,0 +1,30 @@
+# Render blueprint for the Mythica game server (free web service).
+# In the Render dashboard: New -> Blueprint -> connect the mythica repo.
+# Then set the FIREBASE_SERVICE_ACCOUNT secret env var in the dashboard
+# (paste the whole service-account JSON). Never commit it.
+services:
+  - type: web
+    name: mythica-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: CONTENT_PATH
+        value: ../content/mythica-content.json
+      - key: THEATER_MIN_MS
+        value: 10000
+      - key: THEATER_MAX_MS
+        value: 30000
+      - key: HUNT_COOLDOWN_SEC
+        value: 60
+      # Set after the frontend URL is known (GitHub Pages project site):
+      - key: CLIENT_URL
+        value: https://<your-github-username>.github.io/mythica
+      # Set in the Render dashboard as a SECRET (do not put in this file):
+      # - key: FIREBASE_SERVICE_ACCOUNT

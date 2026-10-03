@@ -1,0 +1,9 @@
+node_modules/
+.env.local
+.env*.local
+*.log
+web/out/
+web/.next/
+service-account*.json
+*serviceAccount*.json
+.DS_Store

@@ -1,0 +1,121 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // ---- Catalog: authenticated read, no client writes (developer/server only)
+    match /items/{itemId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /events/{eventId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /quests/{questId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /achievements/{achievementId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+    match /gameSettings/{doc} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ---- Players: owner-only; economy/progression fields never client-writable
+    match /players/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly([
+             'displayName','email','petals','level','xp','createdAt','updatedAt',
+             'lastHuntAt','musicEnabled','sfxEnabled','accountStatus'
+           ])
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.petals == 20
+        && request.resource.data.level == 1
+        && request.resource.data.xp == 0
+        && request.resource.data.accountStatus == 'active'
+        && request.resource.data.musicEnabled == true
+        && request.resource.data.sfxEnabled == true;
+      // Only cosmetic/settings fields are client-writable.
+      // petals, xp, level, lastHuntAt, accountStatus, createdAt, email: server only.
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['displayName','musicEnabled','sfxEnabled','favoriteItemId','updatedAt']);
+      allow delete: if false;
+
+      match /achievements/{aid} {
+        allow read: if isOwner(uid);
+        allow write: if false; // awarded by the game server only
+      }
+    }
+
+    // ---- Inventory: owner read; only the 'favorite' flag is client-writable
+    match /inventories/{uid}/items/{itemId} {
+      allow read: if isOwner(uid);
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['favorite']);
+      allow create, delete: if false; // items granted by the game server only
+    }
+
+    // ---- Marketplace: listings are created AND canceled by the game server
+    // (POST /api/market/list, POST /api/market/cancel). No client writes:
+    // a client-side status flip would strand the escrowed items.
+    match /marketplace/{listingId} {
+      allow read: if signedIn();
+      allow create, update, delete: if false;
+    }
+
+    // ---- Trades: offeredBy creates, offeredTo accepts/cancels; server completes.
+    // NOTE on list: Firestore rules cannot inspect a query's where-clauses,
+    // so list queries cannot be participant-scoped the way get is. The client
+    // only ever queries its own trades (where offeredBy/offeredTo == uid).
+    // Trade offers are low-sensitivity (the marketplace is public by design);
+    // per-document reads stay participant-only.
+    match /trades/{tradeId} {
+      function participant() {
+        return signedIn() && (resource.data.offeredBy == request.auth.uid
+                           || resource.data.offeredTo == request.auth.uid);
+      }
+      allow get: if participant();
+      allow list: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.offeredBy == request.auth.uid
+        && request.resource.data.offeredTo != request.auth.uid
+        && request.resource.data.status == 'offered'
+        && request.resource.data.offerQty >= 1
+        && request.resource.data.wantQty >= 1
+        && request.resource.data.keys().hasOnly([
+             'offeredBy','offeredTo','offerItemId','offerQty',
+             'wantItemId','wantQty','status','createdAt'
+           ]);
+      allow update: if participant() && (
+        // offeredTo accepts the offer
+        (resource.data.status == 'offered'
+         && request.resource.data.status == 'accepted'
+         && resource.data.offeredTo == request.auth.uid
+         && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status','acceptedAt']))
+        ||
+        // either participant cancels an open trade
+        (resource.data.status in ['offered','accepted']
+         && request.resource.data.status == 'canceled'
+         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+      );
+      allow delete: if false;
+    }
+
+    // ---- Server-only collections (Admin SDK bypasses rules; clients get nothing)
+    match /idempotency/{key} {
+      allow read, write: if false;
+    }
+    match /activityLogs/{logId} {
+      allow read, write: if false;
+    }
+  }
+}
