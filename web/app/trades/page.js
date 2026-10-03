@@ -250,6 +250,8 @@ function CreateOffer() {
   const [wantItemId, setWantItemId] = useState('');
   const [wantQty, setWantQty] = useState('1');
   const [offeredTo, setOfferedTo] = useState('');
+  const [recipient, setRecipient] = useState(null); // { uid, displayName, playerCode }
+  const [lookupBusy, setLookupBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -271,13 +273,37 @@ function CreateOffer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, user]);
 
+  const lookupRecipient = async () => {
+    const code = offeredTo.trim().toUpperCase();
+    if (!code) {
+      setError('Enter the recipient’s traveler code.');
+      return;
+    }
+    setLookupBusy(true);
+    setError('');
+    setRecipient(null);
+    try {
+      const res = await api.playerByCode(code);
+      if (res.uid === user.uid) {
+        throw new Error('You cannot trade with yourself.');
+      }
+      setRecipient(res);
+      sfx.click();
+    } catch (err) {
+      sfx.error();
+      setError(err.code === 'not_found' ? 'No traveler found with that code.' : (err.message || 'Lookup failed.'));
+    } finally {
+      setLookupBusy(false);
+    }
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      const to = offeredTo.trim();
-      if (!to) throw new Error('Enter the recipient traveler’s UID.');
+      if (!recipient) throw new Error('Look up the recipient’s traveler code first.');
+      const to = recipient.uid;
       if (to === user.uid) throw new Error('You cannot trade with yourself.');
       const fb = getFirebase();
       await addDoc(collection(fb.db, 'trades'), {
@@ -293,6 +319,7 @@ function CreateOffer() {
       sfx.click();
       setOpen(false);
       setOfferedTo('');
+      setRecipient(null);
     } catch (err) {
       sfx.error();
       setError(err.message || 'Could not create the offer.');
@@ -317,15 +344,32 @@ function CreateOffer() {
           ) : (
             <>
               <div className="field">
-                <label htmlFor="tr-to">Recipient traveler UID</label>
-                <input
-                  id="tr-to"
-                  className="input"
-                  value={offeredTo}
-                  onChange={(e) => setOfferedTo(e.target.value)}
-                  placeholder="Paste their traveler UID"
-                  required
-                />
+                <label htmlFor="tr-to">Recipient traveler code</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    id="tr-to"
+                    className="input"
+                    value={offeredTo}
+                    onChange={(e) => { setOfferedTo(e.target.value); setRecipient(null); }}
+                    placeholder="e.g. X8BL09"
+                    maxLength={6}
+                    style={{ textTransform: 'uppercase', fontFamily: 'monospace', letterSpacing: '0.1em' }}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={lookupRecipient}
+                    disabled={lookupBusy}
+                  >
+                    {lookupBusy ? '…' : 'Find'}
+                  </button>
+                </div>
+                {recipient && (
+                  <p style={{ color: 'var(--gold-soft)', marginTop: '0.5rem' }}>
+                    ✓ {recipient.displayName} (Level {recipient.level})
+                  </p>
+                )}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div className="field">
