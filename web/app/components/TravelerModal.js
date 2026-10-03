@@ -38,7 +38,7 @@ export default function TravelerModal({ uid, onClose }) {
         setProfile(p);
         setStatus(s);
       } catch (e) {
-        if (!cancelled) setError('Could not load this traveler.');
+        if (!cancelled) setError(`Could not load this traveler (${e?.message || e}).`);
       }
     })();
     return () => {
