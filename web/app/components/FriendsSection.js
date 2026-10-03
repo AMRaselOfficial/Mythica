@@ -119,9 +119,8 @@ export default function FriendsSection() {
 
   const doChat = (f) => {
     sfx.click();
-    router.push(
-      `${link('/veyra')}?chat=${encodeURIComponent(otherUid(f.id, user.uid))}`
-    );
+    // NOTE: router.push auto-prepends the Pages basePath — pass the raw route.
+    router.push(`/veyra?chat=${encodeURIComponent(otherUid(f.id, user.uid))}`);
   };
 
   return (

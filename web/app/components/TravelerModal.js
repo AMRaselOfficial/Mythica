@@ -92,7 +92,9 @@ export default function TravelerModal({ uid, onClose }) {
       const chatId = await openPrivateChat(user.uid, uid);
       sfx.click();
       onClose();
-      router.push(`${link('/veyra')}?chat=${encodeURIComponent(chatId)}`);
+      // NOTE: router.push auto-prepends the Pages basePath, so use the raw
+      // route here — link() would double it to /Mythica/Mythica/...
+      router.push(`/veyra?chat=${encodeURIComponent(chatId)}`);
     } catch (e) {
       setError(e.message || 'Could not open the chat.');
       setBusy(false);
