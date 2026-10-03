@@ -9,6 +9,7 @@ import { getFirebase } from '../../lib/firebase.js';
 import { asset, link } from '../../lib/paths.js';
 import { xpProgress } from '../../lib/xp.js';
 import { sfx } from '../../lib/audio.js';
+import FriendsSection from '../components/FriendsSection.js';
 
 export default function ProfilePage() {
   return (
@@ -200,6 +201,8 @@ function ProfileInner() {
           🎒 View Inventory
         </a>
       </div>
+
+      <FriendsSection />
     </div>
   );
 }
