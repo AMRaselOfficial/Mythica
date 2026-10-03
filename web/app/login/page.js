@@ -5,10 +5,12 @@ import { useAuth } from '../../contexts/AuthContext.js';
 import { link } from '../../lib/paths.js';
 import { sfx } from '../../lib/audio.js';
 import { ErrorNotice } from '../components/ui.js';
+import { friendlyAuthError } from '../login/page.js';
 
-export default function LoginPage() {
-  const { login, configured } = useAuth();
+export default function SignupPage() {
+  const { signup, configured } = useAuth();
   const router = useRouter();
+  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -19,9 +21,9 @@ export default function LoginPage() {
     setError('');
     setBusy(true);
     try {
-      await login(email.trim(), password);
-      sfx.click();
-      router.push(link('/dashboard'));
+      await signup(email.trim(), password, displayName.trim());
+      sfx.levelup();
+      router.push('/dashboard');
     } catch (err) {
       sfx.error();
       setError(friendlyAuthError(err));
@@ -32,13 +34,31 @@ export default function LoginPage() {
 
   return (
     <div className="page page-narrow">
-      <h1 className="serif">Return to the Wilds</h1>
+      <h1 className="serif">Begin Your Tale</h1>
+      <p style={{ color: 'var(--ink-dim)' }}>
+        New travelers start with <strong style={{ color: 'var(--gold-soft)' }}>20 petals</strong>,
+        level 1, and an empty satchel waiting to be filled.
+      </p>
       {!configured ? (
         <div className="notice notice-warn">
           Firebase is not configured. See <code>.env.local.example</code>.
         </div>
       ) : (
         <form className="form-card" onSubmit={submit}>
+          <div className="field">
+            <label htmlFor="displayName">Traveler name</label>
+            <input
+              id="displayName"
+              className="input"
+              type="text"
+              autoComplete="nickname"
+              maxLength={40}
+              required
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="e.g. Ashen Wanderer"
+            />
+          </div>
           <div className="field">
             <label htmlFor="email">Email</label>
             <input
@@ -57,34 +77,22 @@ export default function LoginPage() {
               id="password"
               className="input"
               type="password"
-              autoComplete="current-password"
+              autoComplete="new-password"
               required
+              minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
           </div>
           {error && <ErrorNotice message={error} />}
           <button className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%' }}>
-            {busy ? 'Signing in…' : 'Sign In'}
+            {busy ? 'Kindling your lantern…' : 'Create Account'}
           </button>
           <p style={{ marginBottom: 0 }}>
-            <a href={link('/reset')}>Forgot your password?</a> · New here?{' '}
-            <a href={link('/signup')}>Create an account</a>
+            Already wander these woods? <a href={link('/login')}>Sign in</a>
           </p>
         </form>
       )}
     </div>
   );
-}
-
-export function friendlyAuthError(err) {
-  const code = err?.code || '';
-  if (code.includes('user-not-found') || code.includes('wrong-password') || code.includes('invalid-credential'))
-    return 'Email or password did not match our records.';
-  if (code.includes('invalid-email')) return 'That email address does not look valid.';
-  if (code.includes('too-many-requests')) return 'Too many attempts — rest a moment and try again.';
-  if (code.includes('email-already-in-use')) return 'An account with that email already exists.';
-  if (code.includes('weak-password')) return 'Choose a password of at least 6 characters.';
-  if (code.includes('network-request-failed')) return 'Network error — check your connection.';
-  return err?.message || 'Sign-in failed. Please try again.';
 }
