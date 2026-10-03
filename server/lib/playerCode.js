@@ -69,4 +69,34 @@ async function uidByCode(code) {
   return snap.docs[0].id;
 }
 
-module.exports = { generateUniqueCode, ensurePlayerCode, uidByCode, CODE_LEN };
+/**
+ * Ensure a player document carries its own identity fields: `uid` (the
+ * Firebase Auth UID, also the doc ID) and a unique `playerCode`.
+ * Self-healing for docs created before these fields existed — safe to call
+ * on every request (no-op when both are present).
+ * Returns the playerCode (or null when the player doc does not exist).
+ */
+async function ensurePlayerIdentity(uid) {
+  const ref = db.collection('players').doc(uid);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const data = snap.data();
+  const update = {};
+  if (!data.uid) update.uid = uid;
+  if (!data.playerCode) update.playerCode = await generateUniqueCode();
+  if (Object.keys(update).length) {
+    update.updatedAt = Date.now();
+    try {
+      await ref.update(update);
+    } catch (e) {
+      // Race: re-read; whoever won already wrote the fields.
+      const retry = await ref.get();
+      if (retry.exists) return retry.data().playerCode || null;
+      throw e;
+    }
+    return update.playerCode || data.playerCode || null;
+  }
+  return data.playerCode || null;
+}
+
+module.exports = { generateUniqueCode, ensurePlayerCode, ensurePlayerIdentity, uidByCode, CODE_LEN };
