@@ -62,6 +62,20 @@ router.post('/redeem', async (req, res) => {
       const applied = applyXp(player, xpGain, contentApi.content.xpCurve);
       const newPetals = (player.petals || 0) + petalsGain;
 
+      // Firestore transactions require ALL reads before ALL writes, so the
+      // inventory reads are hoisted here ahead of any write.
+      const invReads = [];
+      for (const it of items) {
+        const itemId = String((it && it.itemId) || '');
+        const qty = Math.floor(Number((it && it.quantity) || 0));
+        const item = contentApi.getItem(itemId);
+        if (!item || qty <= 0) continue;
+        const invRef = db.collection('inventories').doc(uid).collection('items').doc(itemId);
+        const invSnap = await tx.get(invRef);
+        invReads.push({ item, itemId, qty, invRef, invSnap });
+      }
+
+      // ---- Writes only from this point on. ----
       tx.update(playerRef, {
         petals: newPetals,
         level: applied.level,
@@ -70,13 +84,7 @@ router.post('/redeem', async (req, res) => {
       });
 
       const grantedItems = [];
-      for (const it of items) {
-        const itemId = String((it && it.itemId) || '');
-        const qty = Math.floor(Number((it && it.quantity) || 0));
-        const item = contentApi.getItem(itemId);
-        if (!item || qty <= 0) continue;
-        const invRef = db.collection('inventories').doc(uid).collection('items').doc(itemId);
-        const invSnap = await tx.get(invRef);
+      for (const { item, itemId, qty, invRef, invSnap } of invReads) {
         if (invSnap.exists) {
           tx.update(invRef, {
             quantity: (invSnap.data().quantity || 0) + qty,
