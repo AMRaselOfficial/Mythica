@@ -40,7 +40,7 @@ export default function Nav() {
   const handleLogout = async () => {
     sfx.click();
     await logout();
-    router.push(link('/'));
+    router.push('/');
   };
 
   const isActive = (href) => pathname === link(href) || pathname === href;
