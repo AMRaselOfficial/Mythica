@@ -44,17 +44,23 @@ export async function getPublicProfile(uid) {
 /**
  * Friendship status between me and another user.
  * Returns 'none' | 'pending-sent' | 'pending-received' | 'accepted' | 'rejected'.
+ * A denied/missing doc simply means 'none' — the doc ID always contains my UID,
+ * so an existing friendship would be readable.
  */
 export async function getFriendshipStatus(myUid, theirUid) {
   if (myUid === theirUid) return 'self';
-  const snap = await getDoc(doc(db(), 'friendships', pairId(myUid, theirUid)));
-  if (!snap.exists()) return 'none';
-  const f = snap.data();
-  if (f.status === 'accepted') return 'accepted';
-  if (f.status === 'pending') {
-    return f.requesterUid === myUid ? 'pending-sent' : 'pending-received';
+  try {
+    const snap = await getDoc(doc(db(), 'friendships', pairId(myUid, theirUid)));
+    if (!snap.exists()) return 'none';
+    const f = snap.data();
+    if (f.status === 'accepted') return 'accepted';
+    if (f.status === 'pending') {
+      return f.requesterUid === myUid ? 'pending-sent' : 'pending-received';
+    }
+    return 'rejected';
+  } catch {
+    return 'none';
   }
-  return 'rejected';
 }
 
 /** Send a friend request to another traveler. */
@@ -106,8 +112,15 @@ export async function sendAgoraMessage({ senderUid, senderName, senderLevel, tex
 export async function openPrivateChat(myUid, theirUid) {
   const id = pairId(myUid, theirUid);
   const ref = doc(db(), 'private_chats', id);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) {
+  let exists = false;
+  try {
+    const snap = await getDoc(ref);
+    exists = snap.exists();
+  } catch {
+    // A denied read means the chat doc isn't there for us — treat as missing.
+    exists = false;
+  }
+  if (!exists) {
     await setDoc(ref, {
       participants: [myUid, theirUid].sort(),
       lastMessage: '',
