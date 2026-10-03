@@ -8,15 +8,22 @@
 const express = require('express');
 const cors = require('cors');
 
-/** CORS origin must be scheme+host only; strip any path from CLIENT_URL. */
-function corsOrigin() {
-  const raw = (process.env.CLIENT_URL || '').trim();
+/** CORS origins: comma-separated list of allowed origins (scheme+host).
+ * Falls back to CLIENT_URL for backwards compatibility. */
+function corsOrigins() {
+  const raw = (process.env.CORS_ORIGINS || process.env.CLIENT_URL || '').trim();
   if (!raw || raw === '*') return '*';
-  try {
-    return new URL(raw).origin;
-  } catch {
-    return raw;
-  }
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      try {
+        return new URL(s).origin;
+      } catch {
+        return s;
+      }
+    });
 }
 const { requireAuth } = require('./lib/auth');
 const { rateLimit } = require('./lib/rateLimit');
@@ -24,7 +31,7 @@ const { rateLimit } = require('./lib/rateLimit');
 const app = express();
 
 app.set('trust proxy', true);
-app.use(cors({ origin: corsOrigin() }));
+app.use(cors({ origin: corsOrigins() }));
 app.use(express.json());
 
 app.get('/health', (req, res) => {
