@@ -48,6 +48,7 @@ app.use(
   require('./routes/upgrade'),
   require('./routes/players'),
   require('./routes/redeem'),
+  require('./routes/events'),
   require('./routes/admin')
 );
 
