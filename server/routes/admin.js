@@ -319,4 +319,156 @@ router.post('/admin/users/:uid/inventory/remove', async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------ *
+ * Redeem codes — promotional codes players redeem via POST /api/redeem.
+ *
+ * GET    /api/admin/redeem-codes
+ * POST   /api/admin/redeem-codes
+ *          { code, petals, xp, items:[{itemId,quantity}], maxRedemptions, active, expiresAt }
+ * PATCH  /api/admin/redeem-codes/:code
+ *          { petals, xp, items, maxRedemptions, active, expiresAt }
+ * DELETE /api/admin/redeem-codes/:code
+ * ------------------------------------------------------------------ */
+
+function normalizeRedeemCode(raw) {
+  return String(raw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 32);
+}
+
+/** Validate the mutable reward/limit fields of a redeem code. Returns { error } or { value }. */
+function validateRedeemFields(body) {
+  const petals = Math.floor(Number(body.petals) || 0);
+  const xp = Math.floor(Number(body.xp) || 0);
+  const maxRedemptions = Math.floor(Number(body.maxRedemptions) || 0);
+  if (petals < 0 || petals > 1000000) return { error: 'bad_petals' };
+  if (xp < 0 || xp > 1000000) return { error: 'bad_xp' };
+  if (maxRedemptions < 0 || maxRedemptions > 10000000) return { error: 'bad_max' };
+
+  const items = [];
+  if (body.items !== undefined) {
+    if (!Array.isArray(body.items) || body.items.length > 20) return { error: 'bad_items' };
+    for (const it of body.items) {
+      const itemId = String((it && it.itemId) || '').trim();
+      const quantity = Math.floor(Number((it && it.quantity) || 0));
+      if (!itemId || !contentApi.getItem(itemId)) return { error: 'unknown_item' };
+      if (quantity < 1 || quantity > 999) return { error: 'bad_item_qty' };
+      items.push({ itemId, quantity });
+    }
+  }
+
+  let expiresAt = null;
+  if (body.expiresAt !== undefined && body.expiresAt !== null && body.expiresAt !== '') {
+    expiresAt = Math.floor(Number(body.expiresAt));
+    if (!Number.isFinite(expiresAt) || expiresAt < 0) return { error: 'bad_expiry' };
+  }
+
+  const active = body.active === undefined ? undefined : Boolean(body.active);
+  return { value: { petals, xp, items, maxRedemptions, active, expiresAt } };
+}
+
+function redeemCodeView(id, d) {
+  return {
+    code: id,
+    petals: d.petals || 0,
+    xp: d.xp || 0,
+    items: Array.isArray(d.items) ? d.items : [],
+    maxRedemptions: d.maxRedemptions || 0,
+    redeemedCount: d.redeemedCount || 0,
+    active: d.active !== false,
+    expiresAt: d.expiresAt || null,
+    createdAt: toMillis(d.createdAt),
+    updatedAt: toMillis(d.updatedAt),
+  };
+}
+
+router.get('/admin/redeem-codes', async (req, res) => {
+  try {
+    const docs = await listDocs('redeemCodes');
+    docs.sort((a, b) => (b.data.createdAt || 0) - (a.data.createdAt || 0));
+    res.json({ ok: true, codes: docs.map(({ id, data }) => redeemCodeView(id, data)) });
+  } catch (e) {
+    console.error('GET /api/admin/redeem-codes failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.post('/admin/redeem-codes', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const code = normalizeRedeemCode(body.code);
+    if (code.length < 3) return res.status(400).json({ ok: false, error: 'bad_code' });
+    const v = validateRedeemFields(body);
+    if (v.error) return res.status(400).json({ ok: false, error: v.error });
+
+    const ref = db.collection('redeemCodes').doc(code);
+    if ((await ref.get()).exists) return res.status(409).json({ ok: false, error: 'exists' });
+
+    const now = Date.now();
+    await ref.set({
+      code,
+      petals: v.value.petals,
+      xp: v.value.xp,
+      items: v.value.items,
+      maxRedemptions: v.value.maxRedemptions,
+      redeemedCount: 0,
+      active: v.value.active !== undefined ? v.value.active : true,
+      expiresAt: v.value.expiresAt,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: req.uid,
+    });
+    await safeLog({ uid: req.uid, type: 'admin_redeem_create', details: { code, byUid: req.uid } });
+    res.json({ ok: true, code });
+  } catch (e) {
+    console.error('POST /api/admin/redeem-codes failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.patch('/admin/redeem-codes/:code', async (req, res) => {
+  try {
+    const code = normalizeRedeemCode(req.params.code);
+    const ref = db.collection('redeemCodes').doc(code);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+
+    const v = validateRedeemFields(req.body || {});
+    if (v.error) return res.status(400).json({ ok: false, error: v.error });
+
+    const update = { updatedAt: Date.now() };
+    // Only overwrite fields the admin actually sent.
+    const body = req.body || {};
+    if (body.petals !== undefined) update.petals = v.value.petals;
+    if (body.xp !== undefined) update.xp = v.value.xp;
+    if (body.items !== undefined) update.items = v.value.items;
+    if (body.maxRedemptions !== undefined) update.maxRedemptions = v.value.maxRedemptions;
+    if (body.active !== undefined) update.active = v.value.active;
+    if (body.expiresAt !== undefined) update.expiresAt = v.value.expiresAt;
+
+    await ref.update(update);
+    await safeLog({ uid: req.uid, type: 'admin_redeem_update', details: { code, update, byUid: req.uid } });
+    res.json({ ok: true, code });
+  } catch (e) {
+    console.error('PATCH /api/admin/redeem-codes/:code failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.delete('/admin/redeem-codes/:code', async (req, res) => {
+  try {
+    const code = normalizeRedeemCode(req.params.code);
+    const ref = db.collection('redeemCodes').doc(code);
+    if (!(await ref.get()).exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    await ref.delete();
+    await safeLog({ uid: req.uid, type: 'admin_redeem_delete', details: { code, byUid: req.uid } });
+    res.json({ ok: true, code });
+  } catch (e) {
+    console.error('DELETE /api/admin/redeem-codes/:code failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
 module.exports = router;
