@@ -20,6 +20,7 @@ export default function Nav() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, player, logout, configured } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Start audio on the very first user gesture (autoplay policy).
   useEffect(() => {
@@ -44,6 +45,29 @@ export default function Nav() {
 
   const isActive = (href) => pathname === link(href) || pathname === href;
 
+  // Close the mobile menu on navigation and on Escape.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
+
+  const toggleMenu = () => {
+    sfx.click();
+    setMenuOpen((o) => !o);
+  };
+
+  const handleLinkClick = () => {
+    sfx.click();
+    setMenuOpen(false);
+  };
+
   return (
     <nav className="nav" aria-label="Main navigation">
       <div className="nav-inner">
@@ -52,13 +76,24 @@ export default function Nav() {
           <span>Mythica</span>
         </a>
         {user && (
-          <div className="nav-links" role="navigation">
+          <button
+            type="button"
+            className="nav-toggle"
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+            aria-expanded={menuOpen}
+            onClick={toggleMenu}
+          >
+            {menuOpen ? '✕' : '☰'}
+          </button>
+        )}
+        {user && (
+          <div className={`nav-links${menuOpen ? ' open' : ''}`} role="navigation">
             {LINKS.map((l) => (
               <a
                 key={l.href}
                 href={link(l.href)}
                 className={isActive(l.href) ? 'active' : ''}
-                onClick={() => sfx.click()}
+                onClick={handleLinkClick}
               >
                 {l.label}
               </a>
