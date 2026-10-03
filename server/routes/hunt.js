@@ -88,6 +88,19 @@ router.post('/hunt', async (req, res) => {
         tx.update(playerRef, playerUpdate);
       }
 
+      // Public traveler profile: base info for Agora, Veyra and friends.
+      // Server-maintained; clients can read but never write (see firestore.rules).
+      tx.set(
+        db.collection('publicProfiles').doc(uid),
+        {
+          displayName: player.displayName || 'Traveler',
+          level: applied.level,
+          playerCode: player.playerCode || null,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+
       if (roll.dropItemId) {
         let quantity;
         if (invSnap.exists) {
