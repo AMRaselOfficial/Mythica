@@ -170,6 +170,9 @@ export const api = {
   playerMe: () => get('/api/player/me'),
   playerByCode: (code) => get(`/api/players/by-code/${encodeURIComponent(code)}`),
   redeem: (code) => post('/api/redeem', { code }),
+  events: () => get('/api/events'),
+  eventJoin: (id) => post(`/api/events/${encodeURIComponent(id)}/join`, {}),
+  eventClaim: (id) => post(`/api/events/${encodeURIComponent(id)}/claim`, {}),
 };
 
 export function newIdempotencyKey() {
