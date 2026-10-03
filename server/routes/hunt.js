@@ -9,13 +9,15 @@ const { db } = require('../lib/db');
 const { activityEntry } = require('../lib/activity');
 const contentApi = require('../lib/content');
 const { rollHunt, applyXp } = require('../lib/game');
+const { generateUniqueCode, ensurePlayerCode } = require('../lib/playerCode');
 
 const router = express.Router();
 
-function newPlayer(now) {
+async function newPlayer(now) {
   return {
     displayName: '',
     email: '',
+    playerCode: await generateUniqueCode(),
     petals: contentApi.startingPetals(),
     level: 1,
     xp: 0,
@@ -44,7 +46,7 @@ router.post('/hunt', async (req, res) => {
       const playerRef = db.collection('players').doc(uid);
       const snap = await tx.get(playerRef);
       const isNew = !snap.exists;
-      const player = isNew ? newPlayer(now) : snap.data();
+      const player = isNew ? await newPlayer(now) : snap.data();
 
       const cd = contentApi.cooldownMs();
       const elapsed = now - (player.lastHuntAt || 0);
