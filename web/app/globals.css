@@ -178,6 +178,11 @@ img {
   color: var(--ink-dim);
 }
 
+/* Hamburger toggle: mobile only (shown in the ≤719px media query). */
+.nav-toggle {
+  display: none;
+}
+
 .petals {
   color: var(--gold-soft);
   font-weight: 600;
@@ -1035,28 +1040,54 @@ body {
     padding: 1.25rem;
   }
 
-  /* Nav: brand + account stay on the first row; the eight section links
-     become a horizontally swipeable strip instead of a tall wrapped block. */
+  /* Nav: hamburger toggle + dropdown menu on phones. */
   .nav-inner {
     row-gap: 0.35rem;
   }
 
-  .nav-links {
-    order: 3;
-    flex: 1 1 100%;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    padding-bottom: 0.15rem;
+  .nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    font-size: 1.3rem;
+    line-height: 1;
+    color: var(--ink);
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
   }
 
-  .nav-links::-webkit-scrollbar {
+  .nav-toggle:hover {
+    border-color: var(--gold-dim);
+  }
+
+  /* Links hidden until the hamburger opens them. */
+  .nav-links {
     display: none;
   }
 
-  .nav-links a {
+  .nav-links.open {
+    display: flex;
+    order: 3;
+    flex: 1 1 100%;
+    flex-direction: column;
+    gap: 0.15rem;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 0.5rem;
+    margin-top: 0.15rem;
+    box-shadow: var(--shadow);
+  }
+
+  .nav-links.open a {
     white-space: nowrap;
+    padding: 0.7rem 0.9rem;
+    font-size: 1rem;
   }
 
   /* Item grids: comfortable two-column cards on phones. */
