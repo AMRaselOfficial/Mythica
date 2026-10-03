@@ -39,6 +39,7 @@ export default function Nav() {
 
   const handleLogout = async () => {
     sfx.click();
+    setMenuOpen(false);
     await logout();
     router.push('/');
   };
@@ -98,12 +99,15 @@ export default function Nav() {
                 {l.label}
               </a>
             ))}
+            <button type="button" className="nav-signout-mobile" onClick={handleLogout}>
+              Sign out
+            </button>
           </div>
         )}
         <div className="nav-user">
           {user && player && <span className="petals">🌸 {player.petals ?? 0}</span>}
           {user ? (
-            <button className="btn btn-ghost btn-sm" onClick={handleLogout}>
+            <button className="btn btn-ghost btn-sm nav-signout-desktop" onClick={handleLogout}>
               Sign out
             </button>
           ) : (
