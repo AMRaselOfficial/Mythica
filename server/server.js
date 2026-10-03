@@ -47,6 +47,7 @@ app.use(
   require('./routes/trades'),
   require('./routes/upgrade'),
   require('./routes/players'),
+  require('./routes/redeem'),
   require('./routes/admin')
 );
 
