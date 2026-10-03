@@ -226,20 +226,39 @@ function CreateListing({ onListed }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!open || !user) return undefined;
-    const fb = getFirebase();
-    if (!fb) return undefined;
-    const unsub = onSnapshot(collection(fb.db, 'inventories', user.uid, 'items'), (snap) => {
-      const rows = [];
-      snap.forEach((d) => rows.push({ itemId: d.id, ...d.data() }));
-      const sellable = rows.filter((r) => {
-        const def = itemById(r.itemId);
-        return def && def.sellable && r.quantity > 0;
-      });
-      setInv(sellable);
-      if (sellable.length && !itemId) setItemId(sellable[0].itemId);
-    });
-    return unsub;
+    if (!open || !user?.uid) return undefined;
+    let unsub;
+    try {
+      const fb = getFirebase();
+      if (!fb?.db) return undefined;
+      unsub = onSnapshot(
+        collection(fb.db, 'inventories', user.uid, 'items'),
+        (snap) => {
+          try {
+            const rows = [];
+            snap.forEach((d) => rows.push({ itemId: d.id, ...d.data() }));
+            const sellable = rows.filter((r) => {
+              const def = itemById(r.itemId);
+              return def && def.sellable && r.quantity > 0;
+            });
+            setInv(sellable);
+            if (sellable.length && !itemId) setItemId(sellable[0].itemId);
+          } catch (e) {
+            console.error('Inventory snapshot error:', e);
+          }
+        },
+        (err) => {
+          console.error('Inventory listener error:', err);
+          setError('Could not load your inventory.');
+        }
+      );
+    } catch (e) {
+      console.error('Failed to setup inventory listener:', e);
+      setError('Could not load your inventory.');
+    }
+    return () => {
+      if (unsub) unsub();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, user]);
 
