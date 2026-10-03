@@ -169,6 +169,7 @@ export const api = {
   upgrade: (itemId, idempotencyKey) => post('/api/upgrade', { itemId, idempotencyKey }),
   playerMe: () => get('/api/player/me'),
   playerByCode: (code) => get(`/api/players/by-code/${encodeURIComponent(code)}`),
+  redeem: (code) => post('/api/redeem', { code }),
 };
 
 export function newIdempotencyKey() {
