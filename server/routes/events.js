@@ -1,214 +1,213 @@
 'use strict';
 /**
- * Shared event helpers for player routes and the admin event manager.
+ * Player event routes.
  *
- * Event doc (collection `events`, id = slug):
- *   title, description, banner (https URL or "assets/..." path),
- *   startAt/endAt (epoch ms), active, featured,
- *   type: 'hunt_count' | 'invite_friends' | 'minigame',
- *   goal (number), rewards { petals, xp, items: [{itemId, quantity}] },
- *   createdAt, updatedAt, createdBy
+ * GET  /api/events            list events with the caller's join/progress state
+ * POST /api/events/:id/join   join a live event
+ * POST /api/events/:id/claim  claim the reward once progress reaches the goal
  *
- * Join doc (collection `eventJoins`, id `${eventId}_${uid}`):
- *   eventId, uid, displayName, eventType (denormalized), joinedAt,
- *   progress, completed, completedAt, claimed, claimedAt
+ * Progress:
+ *   hunt_count    — bumped server-side after each successful hunt (routes/hunt.js)
+ *   invite_friends — counted live from accepted friendships the player requested
+ *   minigame      — scored by the mini-game endpoint (coming later)
+ *
+ * Error codes: not_found, not_live, already_joined, not_joined, ended,
+ *   incomplete, already_claimed, minigame_unavailable
  */
-const EVENT_TYPES = ['hunt_count', 'invite_friends', 'minigame'];
-
-const TYPE_LABELS = {
-  hunt_count: 'Hunt challenge',
-  invite_friends: 'Invite friends',
-  minigame: 'Mini-game',
-};
-
-function eventJoinId(eventId, uid) {
-  return `${eventId}_${uid}`;
-}
-
-/** Normalize a Firestore Timestamp / Date / epoch ms to epoch ms. */
-function toMillis(v) {
-  if (v == null) return 0;
-  if (typeof v === 'number') return v;
-  if (typeof v.toMillis === 'function') return v.toMillis();
-  if (v instanceof Date) return v.getTime();
-  return 0;
-}
-
-/** An event is joinable/playable when active and inside its date window. */
-function isLive(ev, now = Date.now()) {
-  if (!ev || ev.active === false) return false;
-  const start = toMillis(ev.startAt);
-  const end = toMillis(ev.endAt);
-  if (start && now < start) return false;
-  if (end && now > end) return false;
-  return true;
-}
-
-function hasEnded(ev, now = Date.now()) {
-  const end = toMillis(ev.endAt);
-  return !!end && now > end;
-}
-
-/** Sanitize rewards input from admin/user payloads. */
-function sanitizeRewards(raw) {
-  const r = raw || {};
-  const items = Array.isArray(r.items)
-    ? r.items
-        .map((it) => ({
-          itemId: String((it && it.itemId) || '').trim(),
-          quantity: Math.max(0, Math.floor(Number((it && it.quantity) || 0))),
-        }))
-        .filter((it) => it.itemId && it.quantity > 0)
-    : [];
-  return {
-    petals: Math.max(0, Math.floor(Number(r.petals) || 0)),
-    xp: Math.max(0, Math.floor(Number(r.xp) || 0)),
-    items,
-  };
-}
-
-/** Validate + normalize an event payload for create/update. Returns { event } or { error }. */
-function normalizeEventInput(body) {
-  const title = String((body && body.title) || '').trim().slice(0, 80);
-  if (!title) return { error: 'title_required' };
-  const type = String((body && body.type) || 'hunt_count');
-  if (!EVENT_TYPES.includes(type)) return { error: 'invalid_type' };
-  const goal = Math.max(1, Math.floor(Number((body && body.goal) || 0)));
-  if (!goal) return { error: 'goal_required' };
-
-  const startAt = toMillis((body && body.startAt) ?? 0) || Date.now();
-  const endAt = toMillis((body && body.endAt) ?? 0) || startAt + 7 * 24 * 3600 * 1000;
-  if (endAt <= startAt) return { error: 'invalid_dates' };
-
-  return {
-    event: {
-      title,
-      description: String((body && body.description) || '').trim().slice(0, 2000),
-      banner: String((body && body.banner) || '').trim().slice(0, 500),
-      startAt,
-      endAt,
-      active: (body && body.active) !== false,
-      featured: !!(body && body.featured),
-      type,
-      goal,
-      rewards: sanitizeRewards(body && body.rewards),
-    },
-  };
-}
-
-/** Client-safe shape of an event doc. */
-function publicEvent(id, data) {
-  return {
-    id,
-    title: data.title || 'Untitled event',
-    description: data.description || '',
-    banner: data.banner || '',
-    startAt: toMillis(data.startAt),
-    endAt: toMillis(data.endAt),
-    active: data.active !== false,
-    featured: !!data.featured,
-    type: EVENT_TYPES.includes(data.type) ? data.type : 'hunt_count',
-    typeLabel: TYPE_LABELS[data.type] || TYPE_LABELS.hunt_count,
-    goal: Math.max(1, Math.floor(Number(data.goal) || 1)),
-    rewards: sanitizeRewards(data.rewards),
-    live: isLive(data),
-    ended: hasEnded(data),
-  };
-}
-
-/**
- * Count accepted friendships where `uid` was the requester (inviter).
- * Single-field query + in-code filter to avoid a composite index.
- */
-async function countInvites(db, useFake, uid) {
-  const rows = await whereEquals(db, useFake, 'friendships', 'requesterUid', uid);
-  let n = 0;
-  for (const r of rows) if (r.data.status === 'accepted') n += 1;
-  return n;
-}
-
-/**
- * List all docs directly under a collection. Works in real + fake mode.
- * Returns [{ id, data }].
- */
-async function listCollection(db, useFake, collPath) {
-  if (useFake) {
-    return db
-      ._listAll(collPath)
-      .map(({ id, data }) => ({ id, data: data() }));
-  }
-  const snap = await db.collection(collPath).get();
-  return snap.docs.map((d) => ({ id: d.id, data: d.data() }));
-}
-
-/**
- * List docs where field == value. Works in real Firestore and the fake DB.
- * Returns [{ id, data }].
- */
-async function whereEquals(db, useFake, collPath, field, value) {
-  if (useFake) {
-    return db
-      ._listAll(collPath)
-      .filter(({ data }) => data()[field] === value)
-      .map(({ id, data }) => ({ id, data: data() }));
-  }
-  const snap = await db.collection(collPath).where(field, '==', value).get();
-  return snap.docs.map((d) => ({ id: d.id, data: d.data() }));
-}
-
-/** whereEquals inside a transaction (real mode runs the query through tx). */
-async function txWhereEquals(db, tx, useFake, collPath, field, value) {
-  if (useFake) {
-    return db
-      ._listAll(collPath)
-      .filter(({ data }) => data()[field] === value)
-      .map(({ id, data }) => ({ id, data: data() }));
-  }
-  const snap = await tx.get(db.collection(collPath).where(field, '==', value));
-  return snap.docs.map((d) => ({ id: d.id, data: d.data() }));
-}
-
-/**
- * Best-effort progress bump after a successful hunt: +1 on every joined,
- * live hunt_count event the player hasn't finished. Hunts have a cooldown,
- * so read-then-write races are not a concern; the claim endpoint re-validates
- * progress transactionally anyway.
- */
-async function bumpHuntEventProgress(db, useFake, uid) {
-  const now = Date.now();
-  try {
-    const joins = await whereEquals(db, useFake, 'eventJoins', 'uid', uid);
-    for (const { id, data } of joins) {
-      if (data.eventType !== 'hunt_count' || data.completed || data.claimed) continue;
-      const esnap = await db.collection('events').doc(data.eventId).get();
-      if (!esnap.exists || !isLive(esnap.data(), now)) continue;
-      const goal = Math.max(1, Math.floor(Number(esnap.data().goal) || 1));
-      const progress = (data.progress || 0) + 1;
-      const update = { progress };
-      if (progress >= goal) {
-        update.completed = true;
-        update.completedAt = now;
-      }
-      await db.collection('eventJoins').doc(id).update(update);
-    }
-  } catch (e) {
-    console.error('bumpHuntEventProgress failed:', e && e.message);
-  }
-}
-
-module.exports = {
-  EVENT_TYPES,
-  TYPE_LABELS,
+const express = require('express');
+const { db, USE_FAKE } = require('../lib/db');
+const { prepareItemGrants, applyRewardWrites } = require('../lib/rewards');
+const { logActivity } = require('../lib/activity');
+const {
   eventJoinId,
-  toMillis,
   isLive,
-  hasEnded,
-  sanitizeRewards,
-  normalizeEventInput,
   publicEvent,
   countInvites,
   listCollection,
   whereEquals,
   txWhereEquals,
-  bumpHuntEventProgress,
-};
+} = require('../lib/events');
+
+const router = express.Router();
+
+/** Merge the caller's join docs onto the event list. */
+router.get('/events', async (req, res) => {
+  const uid = req.uid;
+  try {
+    const rows = await listCollection(db, USE_FAKE, 'events');
+    const events = [];
+    for (const { id, data } of rows) events.push(publicEvent(id, data));
+    events.sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
+
+    // Load the caller's joins in one query.
+    const joinRows = await whereEquals(db, USE_FAKE, 'eventJoins', 'uid', uid);
+    const joins = {};
+    for (const r of joinRows) joins[r.data.eventId] = r.data;
+
+    // Refresh invite-friends progress live (friendships change outside events).
+    const now = Date.now();
+    for (const ev of events) {
+      const j = joins[ev.id];
+      if (j && ev.type === 'invite_friends' && !j.claimed) {
+        try {
+          const invites = await countInvites(db, USE_FAKE, uid);
+          if (invites !== (j.progress || 0)) {
+            const update = { progress: invites };
+            if (!j.completed && invites >= ev.goal) {
+              update.completed = true;
+              update.completedAt = now;
+            }
+            await db.collection('eventJoins').doc(eventJoinId(ev.id, uid)).update(update);
+            j.progress = invites;
+            if (update.completed) {
+              j.completed = true;
+              j.completedAt = now;
+            }
+          }
+        } catch (e) {
+          console.error('event invite sync failed:', e && e.message);
+        }
+      }
+      ev.joined = !!j;
+      ev.progress = j ? j.progress || 0 : 0;
+      ev.completed = !!(j && j.completed);
+      ev.claimed = !!(j && j.claimed);
+    }
+
+    return res.json({ ok: true, events });
+  } catch (e) {
+    console.error('GET /api/events failed:', e);
+    return res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.post('/events/:id/join', async (req, res) => {
+  const uid = req.uid;
+  const eventId = String(req.params.id || '').slice(0, 80);
+  try {
+    const now = Date.now();
+    const eventRef = db.collection('events').doc(eventId);
+    const joinRef = db.collection('eventJoins').doc(eventJoinId(eventId, uid));
+
+    const [eventSnap, joinSnap, playerSnap] = await Promise.all([
+      eventRef.get(),
+      joinRef.get(),
+      db.collection('players').doc(uid).get(),
+    ]);
+    if (!eventSnap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    const ev = publicEvent(eventId, eventSnap.data());
+    if (!isLive(eventSnap.data(), now))
+      return res.status(400).json({ ok: false, error: 'not_live' });
+    if (joinSnap.exists) return res.status(400).json({ ok: false, error: 'already_joined' });
+
+    const player = playerSnap.exists ? playerSnap.data() : {};
+    let progress = 0;
+    if (ev.type === 'invite_friends') {
+      try {
+        progress = await countInvites(db, USE_FAKE, uid);
+      } catch (e) {
+        console.error('event join invite count failed:', e && e.message);
+      }
+    }
+
+    await joinRef.set({
+      eventId,
+      uid,
+      displayName: player.displayName || 'Traveler',
+      eventType: ev.type,
+      joinedAt: now,
+      progress,
+      completed: progress >= ev.goal,
+      completedAt: progress >= ev.goal ? now : null,
+      claimed: false,
+      claimedAt: null,
+    });
+
+    try {
+      await logActivity(db, { uid, type: 'event_join', details: { eventId, title: ev.title } });
+    } catch (e) {
+      console.error('event join activity log failed:', e && e.message);
+    }
+    return res.json({ ok: true, joined: true, progress });
+  } catch (e) {
+    console.error('POST /api/events/:id/join failed:', e);
+    return res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.post('/events/:id/claim', async (req, res) => {
+  const uid = req.uid;
+  const eventId = String(req.params.id || '').slice(0, 80);
+  try {
+    const out = await db.runTransaction(async (tx) => {
+      const now = Date.now();
+      const eventRef = db.collection('events').doc(eventId);
+      const joinRef = db.collection('eventJoins').doc(eventJoinId(eventId, uid));
+      const playerRef = db.collection('players').doc(uid);
+
+      const eventSnap = await tx.get(eventRef);
+      const joinSnap = await tx.get(joinRef);
+      const playerSnap = await tx.get(playerRef);
+
+      if (!eventSnap.exists) return { error: 'not_found' };
+      if (!joinSnap.exists) return { error: 'not_joined' };
+      const ev = publicEvent(eventId, eventSnap.data());
+      const join = joinSnap.data();
+      if (join.claimed) return { error: 'already_claimed' };
+      if (ev.type === 'minigame') return { error: 'minigame_unavailable' };
+      if (!playerSnap.exists) return { error: 'not_found' };
+
+      // Recompute invite progress inside the transaction for correctness.
+      let progress = join.progress || 0;
+      if (ev.type === 'invite_friends') {
+        const rows = await txWhereEquals(db, tx, USE_FAKE, 'friendships', 'requesterUid', uid);
+        progress = 0;
+        for (const r of rows) if (r.data.status === 'accepted') progress += 1;
+      }
+      if (progress < ev.goal) return { error: 'incomplete', progress, goal: ev.goal };
+
+      const player = playerSnap.data();
+      const invReads = await prepareItemGrants(db, tx, uid, ev.rewards.items);
+
+      // ---- Writes only from this point on. ----
+      const rewards = applyRewardWrites(db, tx, {
+        uid,
+        player,
+        petals: ev.rewards.petals,
+        xp: ev.rewards.xp,
+        invReads,
+        now,
+      });
+
+      tx.update(joinRef, {
+        progress,
+        completed: true,
+        completedAt: join.completedAt || now,
+        claimed: true,
+        claimedAt: now,
+      });
+
+      return { ok: true, rewards };
+    });
+
+    if (out.error) {
+      const status = out.error === 'not_found' ? 404 : 400;
+      return res.status(status).json({ ok: false, error: out.error });
+    }
+    try {
+      await logActivity(db, {
+        uid,
+        type: 'event_claim',
+        details: { eventId, rewards: out.rewards },
+      });
+    } catch (e) {
+      console.error('event claim activity log failed:', e && e.message);
+    }
+    return res.json(out);
+  } catch (e) {
+    console.error('POST /api/events/:id/claim failed:', e);
+    return res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+module.exports = router;
