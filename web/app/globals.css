@@ -189,6 +189,12 @@ img {
   white-space: nowrap;
 }
 
+/* Sign-out lives in the header on desktop, inside the hamburger
+   dropdown on mobile. */
+.nav-signout-mobile {
+  display: none;
+}
+
 /* ---------- Buttons / forms ---------- */
 .btn {
   display: inline-flex;
@@ -1063,6 +1069,41 @@ body {
 
   .nav-toggle:hover {
     border-color: var(--gold-dim);
+  }
+
+  /* Mobile header order: brand, currency (🌸), hamburger. The dropdown
+     panel drops to a full-width row below. */
+  .nav-user {
+    order: 1;
+  }
+
+  .nav-toggle {
+    order: 2;
+  }
+
+  /* Desktop sign-out hides on mobile; the dropdown carries its own. */
+  .nav-signout-desktop {
+    display: none;
+  }
+
+  .nav-signout-mobile {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 0.7rem 0.9rem;
+    font-size: 1rem;
+    color: var(--ink-dim);
+    background: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .nav-signout-mobile:hover {
+    color: var(--ink);
+    background: var(--bg-card);
   }
 
   /* Links hidden until the hamburger opens them. */
