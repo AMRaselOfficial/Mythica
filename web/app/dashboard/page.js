@@ -100,6 +100,12 @@ function DashboardInner() {
         <a className="btn" href={link('/trades')} onClick={() => sfx.click()}>
           🤝 Trades
         </a>
+        <a className="btn" href={link('/agora')} onClick={() => sfx.click()}>
+          🏛️ Agora
+        </a>
+        <a className="btn" href={link('/veyra')} onClick={() => sfx.click()}>
+          ✉️ Veyra
+        </a>
       </div>
 
       {featured && (
