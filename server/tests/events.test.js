@@ -258,3 +258,26 @@ test('admin: event joins detail shows participants and stats', async () => {
     await close();
   }
 });
+
+test('player identity: new players get uid; ensurePlayerIdentity backfills old docs', async () => {
+  const { base, close } = await startServer();
+  try {
+    resetFakeDb();
+    // Simulate an old doc without uid/playerCode
+    const now = Date.now();
+    await db.collection('players').doc('oldtimer').set({
+      displayName: 'OldTimer', petals: 20, level: 1, xp: 0,
+      createdAt: now, updatedAt: now,
+    });
+    // Hitting /api/player/me heals the doc
+    const r = await get(base, '/api/player/me', { Authorization: 'Bearer ' + 'test-oldtimer' });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.uid, 'oldtimer');
+    assert.ok(r.json.playerCode);
+    const snap = await db.collection('players').doc('oldtimer').get();
+    assert.equal(snap.data().uid, 'oldtimer');
+    assert.ok(snap.data().playerCode);
+  } finally {
+    await close();
+  }
+});
