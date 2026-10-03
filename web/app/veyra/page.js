@@ -81,7 +81,8 @@ function VeyraInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, user]);
 
-  // Chat list.
+  // Chat list. NOTE: no orderBy here — array-contains + orderBy needs a
+  // Firestore composite index; we sort the (small) result client-side instead.
   useEffect(() => {
     if (!user) return undefined;
     const fb = getFirebase();
@@ -89,7 +90,6 @@ function VeyraInner() {
     const q = query(
       collection(fb.db, 'private_chats'),
       where('participants', 'array-contains', user.uid),
-      orderBy('updatedAt', 'desc'),
       limit(30)
     );
     return onSnapshot(
@@ -97,9 +97,13 @@ function VeyraInner() {
       (snap) => {
         const rows = [];
         snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
+        rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
         setChats(rows);
       },
-      () => setChats([])
+      (err) => {
+        console.error('Veyra chat list error:', err);
+        setChats([]);
+      }
     );
   }, [user]);
 
