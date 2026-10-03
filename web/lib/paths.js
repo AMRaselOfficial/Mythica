@@ -7,9 +7,10 @@ export function asset(p) {
   return BASE ? `${BASE}/${clean}` : `/${clean}`;
 }
 
-/** Prefix an internal route with the basePath: link('/hunt') */
+/** Prefix an internal route with the basePath: link('/hunt'). Idempotent. */
 export function link(p) {
   const clean = String(p || '');
   if (!clean.startsWith('/')) return clean;
+  if (BASE && (clean === BASE || clean.startsWith(BASE + '/'))) return clean;
   return BASE ? `${BASE}${clean}` : clean;
 }
