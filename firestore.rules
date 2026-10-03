@@ -14,6 +14,12 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if false;
     }
+    // Event participation — server-only. Players join/claim through the
+    // game server; the admin manages events through the admin API.
+    match /eventJoins/{joinId} {
+      allow read: if false;
+      allow write: if false;
+    }
     match /quests/{questId} {
       allow read: if signedIn();
       allow write: if false;
@@ -116,6 +122,118 @@ service cloud.firestore {
     }
     match /activityLogs/{logId} {
       allow read, write: if false;
+    }
+
+    // ---- Redeem codes: created/managed via the admin API, redeemed via
+    // POST /api/redeem. No client reads or writes; the Admin SDK bypasses rules.
+    match /redeemCodes/{code} {
+      allow read, write: if false;
+    }
+    match /redeemClaims/{claimId} {
+      allow read, write: if false;
+    }
+
+    // ---- Social: public traveler profiles (base info only, server-maintained)
+    match /publicProfiles/{uid} {
+      allow read: if signedIn();
+      allow write: if false; // maintained by the game server only
+    }
+
+    // ---- Social: Agora public chat. Readable by all travelers; only level 10+
+    // can speak. Under-10 travelers can read but not send.
+    match /agora_messages/{msgId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.senderUid == request.auth.uid
+        && get(/databases/$(database)/documents/players/$(request.auth.uid)).data.level >= 10
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 500
+        && request.resource.data.keys().hasOnly(
+             ['senderUid','senderName','senderLevel','text','createdAt']
+           );
+      allow update, delete: if false;
+    }
+
+    // ---- Social: friendships. Doc ID is the two UIDs sorted and joined with '_'.
+    // List queries are participant-scoped client-side (array-contains own uid);
+    // per-document reads stay participant-only like trades.
+    function friendshipId(a, b) {
+      return a < b ? a + '_' + b : b + '_' + a;
+    }
+    match /friendships/{fid} {
+      function participant() {
+        return signedIn() && request.auth.uid in resource.data.users;
+      }
+      allow get: if participant();
+      allow list: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.users.size() == 2
+        && request.auth.uid in request.resource.data.users
+        && request.resource.data.users[0] != request.resource.data.users[1]
+        && fid == friendshipId(
+             request.resource.data.users[0], request.resource.data.users[1])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.requesterUid == request.auth.uid
+        && request.resource.data.keys().hasOnly(
+             ['users','status','requesterUid','createdAt','updatedAt']);
+      allow update: if participant()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status','updatedAt'])
+        && (
+             // recipient accepts the request
+             (resource.data.status == 'pending'
+              && request.resource.data.status == 'accepted'
+              && resource.data.requesterUid != request.auth.uid)
+             ||
+             // recipient rejects, requester cancels, or either side unfriends
+             (request.resource.data.status == 'rejected')
+           );
+      allow delete: if false;
+    }
+
+    // ---- Social: Veyra private chats. Friends-only: creating a chat (and every
+    // message) requires an accepted friendship between the two travelers.
+    // Chat doc ID uses the same sorted-join scheme as friendships.
+    match /private_chats/{chatId} {
+      function chatParticipant() {
+        return signedIn() && request.auth.uid in resource.data.participants;
+      }
+      allow get: if chatParticipant();
+      allow list: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.participants.size() == 2
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.participants[0] != request.resource.data.participants[1]
+        && chatId == friendshipId(
+             request.resource.data.participants[0],
+             request.resource.data.participants[1])
+        && get(/databases/$(database)/documents/friendships/$(chatId)).data.status == 'accepted'
+        && request.resource.data.keys().hasOnly(
+             ['participants','lastMessage','lastMessageAt','updatedAt']);
+      allow update: if chatParticipant()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['lastMessage','lastMessageAt','updatedAt']);
+      allow delete: if false;
+
+      match /messages/{msgId} {
+        allow read: if signedIn()
+          && request.auth.uid in get(
+               /databases/$(database)/documents/private_chats/$(chatId)
+             ).data.participants;
+        allow create: if signedIn()
+          && request.resource.data.senderUid == request.auth.uid
+          && request.auth.uid in get(
+               /databases/$(database)/documents/private_chats/$(chatId)
+             ).data.participants
+          && get(/databases/$(database)/documents/friendships/$(chatId)).data.status == 'accepted'
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000
+          && request.resource.data.keys().hasOnly(
+               ['senderUid','text','createdAt']);
+        allow update, delete: if false;
+      }
     }
   }
 }
