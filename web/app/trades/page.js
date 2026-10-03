@@ -5,7 +5,6 @@ import {
   collection,
   doc,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   updateDoc,
@@ -39,8 +38,11 @@ function TradesInner() {
     const fb = getFirebase();
     if (!fb) return undefined;
     const col = collection(fb.db, 'trades');
-    const qBy = query(col, where('offeredBy', '==', user.uid), orderBy('createdAt', 'desc'));
-    const qTo = query(col, where('offeredTo', '==', user.uid), orderBy('createdAt', 'desc'));
+    // NOTE: no orderBy here — where+orderBy on different fields needs a
+    // Firestore composite index. The merge() below sorts client-side instead
+    // (same pattern as the Veyra chat list).
+    const qBy = query(col, where('offeredBy', '==', user.uid));
+    const qTo = query(col, where('offeredTo', '==', user.uid));
     let a = [],
       b = [];
     const merge = () => {
