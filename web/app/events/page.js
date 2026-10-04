@@ -1,278 +1,293 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
-import { collection, getDocs, limit, onSnapshot, orderBy, query, startAfter } from 'firebase/firestore';
+import { useCallback, useEffect, useState } from 'react';
 import Protected from '../components/Protected.js';
 import { LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
-import { Icon } from '../components/icons.js';
-import TravelerModal from '../components/TravelerModal.js';
-import { useAuth } from '../../contexts/AuthContext.js';
-import { getFirebase } from '../../lib/firebase.js';
-import { sfx } from '../../lib/audio.js';
-import {
-  AGORA_SEND_MIN_LEVEL,
-  AGORA_MESSAGE_MAX,
-  sendAgoraMessage,
-} from '../../lib/social.js';
+import { Icon, BigIcon } from '../components/icons.js';
+import content from '../../lib/content.js';
+import { api } from '../../lib/api.js';
+import { asset } from '../../lib/paths.js';
 
-const PAGE_SIZE = 50;
+/** Resolve cover art: full URLs pass through, repo paths go through asset(). */
+export function coverSrc(banner) {
+  const b = String(banner || '').trim();
+  if (!b) return '';
+  if (/^https?:\/\//i.test(b)) return b;
+  return asset(b);
+}
 
-export default function AgoraPage() {
+function fmtDate(ms) {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function challengeText(ev) {
+  if (ev.type === 'invite_friends') return `Invite ${ev.goal} friend${ev.goal === 1 ? '' : 's'}`;
+  if (ev.type === 'minigame') return 'Mini-game challenge';
+  return `Hunt ${ev.goal} time${ev.goal === 1 ? '' : 's'}`;
+}
+
+function rewardsText(rewards) {
+  const parts = [];
+  if (rewards.petals) parts.push(<span key="p"><Icon name="petals" /> {rewards.petals}</span>);
+  if (rewards.xp) parts.push(<span key="x"><Icon name="sparkles" /> {rewards.xp} XP</span>);
+  for (const [i, it] of (rewards.items || []).entries()) {
+    parts.push(<span key={'i' + i}><Icon name="gift" /> {it.name || it.itemId} ×{it.quantity}</span>);
+  }
+  if (!parts.length) return 'Mystery rewards';
+  return parts.reduce((acc, el, i) => (i === 0 ? [el] : [...acc, ' · ', el]), []);
+}
+
+function EventCard({ event: ev, onJoin, onClaim, busy }) {
+  const [imgOk, setImgOk] = useState(true);
+  const src = coverSrc(ev.banner);
+  const pct = ev.goal ? Math.min(100, Math.round(((ev.progress || 0) / ev.goal) * 100)) : 0;
+  const badge = ev.claimed
+    ? 'Claimed'
+    : ev.live
+      ? 'Live'
+      : ev.ended
+        ? 'Ended'
+        : 'Upcoming';
+  const badgeColor = ev.live && !ev.claimed ? 'var(--success)' : 'var(--ink-faint)';
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {imgOk && src ? (
+        <img
+          src={src}
+          alt={ev.title}
+          style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }}
+          onError={() => setImgOk(false)}
+        />
+      ) : (
+        <div
+          style={{
+            aspectRatio: '16/9',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '3rem',
+            background: 'linear-gradient(135deg, #1a2340, #0d1226)',
+            color: 'var(--gold-soft, #d8b36a)',
+          }}
+          aria-hidden="true"
+        >
+          <BigIcon name="events" size="3rem" />
+        </div>
+      )}
+      <div style={{ padding: '1.25rem' }}>
+        <h3 className="serif" style={{ margin: '0 0 0.4rem' }}>
+          {ev.title}{' '}
+          <span className="rarity-tag" style={{ '--rarity': badgeColor }}>
+            {badge}
+          </span>
+        </h3>
+        <p style={{ color: 'var(--ink-dim)', fontSize: '0.85rem', margin: '0 0 0.5rem' }}>
+          {fmtDate(ev.startAt)} → {fmtDate(ev.endAt)} · {ev.typeLabel || challengeText(ev)}
+        </p>
+        {ev.description && (
+          <p style={{ color: 'var(--ink-dim)', margin: '0 0 0.75rem' }}>{ev.description}</p>
+        )}
+        <p style={{ margin: '0 0 0.75rem' }}>
+          <strong>Challenge:</strong> {challengeText(ev)}
+          <br />
+          <strong>Rewards:</strong> {rewardsText(ev.rewards || {})}
+        </p>
+
+        {ev.type === 'minigame' ? (
+          <p className="muted"><Icon name="gamepad" /> The mini-game for this event is arriving soon.</p>
+        ) : !ev.joined && ev.live ? (
+          <button className="btn btn-primary" disabled={busy} onClick={() => onJoin(ev)}>
+            {busy ? 'Joining…' : 'Join event'}
+          </button>
+        ) : ev.joined ? (
+          <div>
+            <div
+              style={{
+                height: 10,
+                borderRadius: 6,
+                background: 'var(--surface-2)',
+                overflow: 'hidden',
+                marginBottom: '0.4rem',
+              }}
+            >
+              <div
+                style={{
+                  width: `${pct}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, var(--accent), var(--accent-2))',
+                  transition: 'width 0.4s',
+                }}
+              />
+            </div>
+            <p style={{ margin: '0 0 0.6rem', fontSize: '0.9rem' }}>
+              Progress: <strong>{ev.progress || 0} / {ev.goal}</strong>
+              {ev.completed && !ev.claimed && <> — complete! <Icon name="party" /></>}
+            </p>
+            {ev.completed && !ev.claimed && (
+              <button className="btn btn-primary" disabled={busy} onClick={() => onClaim(ev)}>
+                {busy ? 'Claiming…' : 'Claim rewards'}
+              </button>
+            )}
+            {ev.claimed && <p style={{ color: 'var(--success)', margin: 0 }}><Icon name="success" /> Rewards claimed</p>}
+          </div>
+        ) : (
+          <p className="muted">{ev.ended ? 'This event has ended.' : 'This event has not started yet.'}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function EventsPage() {
   return (
     <Protected>
-      <AgoraInner />
+      <EventsInner />
     </Protected>
   );
 }
 
-function fmtTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+function EventsInner() {
+  const [events, setEvents] = useState(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busyId, setBusyId] = useState('');
 
-function AgoraInner() {
-  const { user, player } = useAuth();
-  const [messages, setMessages] = useState(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadError, setLoadError] = useState('');
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState('');
-  const [selectedUid, setSelectedUid] = useState(null);
-  const bottomRef = useRef(null);
-
-  const level = player?.level || 1;
-  const canSpeak = level >= AGORA_SEND_MIN_LEVEL;
+  const load = useCallback(async () => {
+    try {
+      const data = await api.events();
+      setEvents(data.events || []);
+    } catch {
+      // Fall back to bundled content events (read-only legacy display).
+      setError('Could not reach the event board — showing tale records instead.');
+      setEvents((content.events || []).map((e) => ({ ...e, legacy: true })));
+    }
+  }, []);
 
   useEffect(() => {
-    if (!user) return undefined;
-    const fb = getFirebase();
-    if (!fb?.db) return undefined;
-    const q = query(
-      collection(fb.db, 'agora_messages'),
-      orderBy('createdAt', 'desc'),
-      limit(PAGE_SIZE)
-    );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const rows = [];
-        snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-        const latest = rows.reverse();
-        // Merge instead of replace so messages loaded via "load older"
-        // are kept when the live listener fires.
-        setMessages((prev) => {
-          const map = new Map();
-          (prev || []).forEach((m) => map.set(m.id, m));
-          latest.forEach((m) => map.set(m.id, m));
-          return [...map.values()].sort(
-            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
-          );
-        });
-        setLoadError('');
-      },
-      () => setLoadError('Could not load the Agora.')
-    );
-    return unsub;
-  }, [user]);
+    load();
+  }, [load]);
 
-  const loadOlder = async () => {
-    if (loadingMore || !hasMore) return;
-    const fb = getFirebase();
-    if (!fb?.db || !messages || messages.length === 0) return;
-    setLoadingMore(true);
+  const onJoin = async (ev) => {
+    setBusyId(ev.id);
+    setNotice('');
     try {
-      const oldestTs = Math.min(...messages.map((m) => m.createdAt || 0));
-      const q = query(
-        collection(fb.db, 'agora_messages'),
-        orderBy('createdAt', 'desc'),
-        startAfter(oldestTs),
-        limit(PAGE_SIZE)
-      );
-      const snap = await getDocs(q);
-      const rows = [];
-      snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-      if (rows.length < PAGE_SIZE) setHasMore(false);
-      if (rows.length > 0) {
-        const older = rows.reverse();
-        setMessages((prev) => {
-          const map = new Map();
-          (prev || []).forEach((m) => map.set(m.id, m));
-          older.forEach((m) => {
-            if (!map.has(m.id)) map.set(m.id, m);
-          });
-          return [...map.values()].sort(
-            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
-          );
-        });
-      }
-    } catch {
-      setLoadError('Could not load older messages.');
+      await api.eventJoin(ev.id);
+      setNotice(<><Icon name="success" /> You joined \u201c{ev.title}\u201d!</>);
+      await load();
+    } catch (e) {
+      setNotice(<><Icon name="warning" /> {e.message || 'Could not join the event.'}</>);
     } finally {
-      setLoadingMore(false);
+      setBusyId('');
     }
   };
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages?.length]);
-
-  const send = async (e) => {
-    e.preventDefault();
-    if (!canSpeak || sending) return;
-    setSending(true);
-    setSendError('');
+  const onClaim = async (ev) => {
+    setBusyId(ev.id);
+    setNotice('');
     try {
-      await sendAgoraMessage({
-        senderUid: user.uid,
-        senderName: player?.displayName || 'Traveler',
-        senderLevel: level,
-        text,
-      });
-      sfx.click();
-      setText('');
-    } catch (err) {
-      sfx.error();
-      setSendError(err.message || 'Could not send your message.');
+      const out = await api.eventClaim(ev.id);
+      const r = out.rewards || {};
+      const parts = [];
+      if (r.petals) parts.push(<span key="p"><Icon name="petals" /> {r.petals}</span>);
+      if (r.xp) parts.push(<span key="x"><Icon name="sparkles" /> {r.xp} XP{r.leveledUp ? ' (level up!)' : ''}</span>);
+      for (const [i, it] of (r.items || []).entries()) {
+        parts.push(<span key={'i' + i}><Icon name="gift" /> {it.name} ×{it.quantity}</span>);
+      }
+      setNotice(
+        <><Icon name="success" /> Rewards claimed:{' '}
+          {parts.length ? parts.reduce((acc, el, i) => (i === 0 ? [el] : [...acc, ' · ', el]), []) : 'nothing'}
+        </>
+      );
+      await load();
+    } catch (e) {
+      setNotice(<><Icon name="warning" /> {e.message || 'Could not claim rewards.'}</>);
     } finally {
-      setSending(false);
+      setBusyId('');
     }
   };
 
   return (
     <div className="page">
-      <h1 className="serif"><Icon name="agora" /> Agora</h1>
-      <p style={{ color: 'var(--ink-dim)', marginTop: '-0.5rem' }}>
-        The public square — every traveler gathers here.
-        {!canSpeak && (
-          <> Reach <strong>level {AGORA_SEND_MIN_LEVEL}</strong> to speak; until then you can read along.</>
-        )}
+      <h1 className="serif">Events</h1>
+      <p style={{ color: 'var(--ink-dim)' }}>
+        Seasonal stirrings in the realm — join limited-time challenges and earn rewards.
       </p>
 
-      <div
-        className="card"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          height: 'min(62vh, 560px)',
-          padding: 0,
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-          {!messages && !loadError && <LoadingBlock label="Listening to the square" />}
-          {loadError && <ErrorNotice message={loadError} />}
-          {messages && messages.length === 0 && (
-            <EmptyState
-              icon="agora"
-              title="Quiet… for now"
-              body="Be the first voice in the Agora."
-            />
-          )}
-          {messages && messages.length > 0 && (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-              {hasMore && (
-                <li style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => {
-                      sfx.click();
-                      loadOlder();
-                    }}
-                    disabled={loadingMore}
-                  >
-                    {loadingMore ? 'Loading…' : <><Icon name="up" /> Load older messages</>}
-                  </button>
-                </li>
-              )}
-              {messages.map((m) => {
-                const mine = m.senderUid === user?.uid;
-                return (
-                  <li key={m.id} style={{ marginBottom: '0.7rem' }}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--ink-dim)' }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          sfx.click();
-                          setSelectedUid(m.senderUid);
-                        }}
-                        title="View traveler"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          padding: 0,
-                          cursor: 'pointer',
-                          color: mine ? 'var(--gold-soft)' : 'var(--link, #9db8ff)',
-                          fontWeight: 600,
-                          fontSize: '0.85rem',
-                        }}
-                      >
-                        {m.senderName || 'Traveler'}
-                      </button>
-                      {' '}· Lv {m.senderLevel ?? '—'}
-                      {' '}· {fmtTime(m.createdAt)}
-                    </div>
-                    <div style={{ marginTop: '0.15rem', overflowWrap: 'anywhere' }}>
-                      {m.text}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <div ref={bottomRef} />
-        </div>
-
-        <form
-          onSubmit={send}
+      {error && <ErrorNotice message={error} />}
+      {notice && (
+        <p
           style={{
-            display: 'flex',
-            gap: '0.5rem',
-            padding: '0.75rem 1rem',
-            borderTop: '1px solid var(--border, rgba(255,255,255,0.08))',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            padding: '0.6rem 0.9rem',
           }}
         >
-          <input
-            className="input"
-            style={{ flex: 1 }}
-            placeholder={
-              canSpeak
-                ? 'Speak to the square…'
-                : `Reach level ${AGORA_SEND_MIN_LEVEL} to speak in the Agora`
-            }
-            value={text}
-            maxLength={AGORA_MESSAGE_MAX}
-            onChange={(e) => setText(e.target.value)}
-            disabled={!canSpeak || sending}
-            aria-label="Agora message"
-          />
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={!canSpeak || sending || !text.trim()}
-          >
-            {sending ? 'Sending…' : 'Send'}
-          </button>
-        </form>
-      </div>
-      {sendError && <ErrorNotice message={sendError} />}
-      {!canSpeak && (
-        <p style={{ color: 'var(--ink-dim)', fontSize: '0.9rem' }}>
-          <Icon name="tip" /> Tip: complete hunts to earn XP and level up. You can still add friends from
-          travelers' profiles and chat privately in Veyra at any level.
+          {notice}
         </p>
       )}
-
-      {selectedUid && (
-        <TravelerModal uid={selectedUid} onClose={() => setSelectedUid(null)} />
+      {!events && <LoadingBlock label="Reading the event board" />}
+      {events && events.length === 0 && (
+        <EmptyState icon="scroll" title="No events" body="The realm is quiet for now. Check back soon." />
       )}
+      {events && events.length > 0 && (
+        <div className="grid-cards">
+          {events.map((e) =>
+            e.legacy ? (
+              <LegacyEventCard key={e.id || e.title} event={e} />
+            ) : (
+              <EventCard
+                key={e.id}
+                event={e}
+                onJoin={onJoin}
+                onClaim={onClaim}
+                busy={busyId === e.id}
+              />
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only card for legacy bundled events when the API is unreachable. */
+function LegacyEventCard({ event: e }) {
+  const [imgOk, setImgOk] = useState(true);
+  const src = coverSrc(e.banner);
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {imgOk && src ? (
+        <img
+          src={src}
+          alt={e.title}
+          style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }}
+          onError={() => setImgOk(false)}
+        />
+      ) : (
+        <div
+          style={{
+            aspectRatio: '16/9',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, #1a2340, #0d1226)',
+            color: 'var(--gold-soft, #d8b36a)',
+          }}
+          aria-hidden="true"
+        >
+          <BigIcon name="waves" size="3rem" />
+        </div>
+      )}
+      <div style={{ padding: '1.25rem' }}>
+        <h3 className="serif" style={{ margin: '0 0 0.4rem' }}>{e.title}</h3>
+        <p style={{ color: 'var(--ink-dim)' }}>{e.description}</p>
+      </div>
     </div>
   );
 }
