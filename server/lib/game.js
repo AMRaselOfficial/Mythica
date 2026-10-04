@@ -21,15 +21,19 @@ function weightedPick(rng, pool) {
 /**
  * Roll a hunt: { xpGained, petalsFound, dropItemId|null }.
  * Data-driven: rolls only active items from the content's item list.
+ * playerLevel gates the pool: items with minLevel above the player's level
+ * cannot drop (rare finds need higher levels). Defaults to no gating.
  */
-function rollHunt(rng, content) {
+function rollHunt(rng, content, playerLevel = Infinity) {
   const h = content.hunt;
   const xpGained = randInt(rng, h.xpMin, h.xpMax);
   const petalsFound =
     rng() < h.petalFindChance ? randInt(rng, h.petalFindMin, h.petalFindMax) : 0;
   let dropItemId = null;
   if (rng() < h.dropChance) {
-    const pool = content.items.filter((i) => i.active && (i.dropWeight || 0) > 0);
+    const pool = content.items.filter(
+      (i) => i.active && (i.dropWeight || 0) > 0 && (i.minLevel || 1) <= playerLevel
+    );
     if (pool.length > 0) dropItemId = weightedPick(rng, pool).id;
   }
   return { xpGained, petalsFound, dropItemId };
@@ -69,14 +73,20 @@ function validatePurchase({ listing, buyerUid, buyerPetals }) {
   return null;
 }
 
-/** Upgrade validation. Returns an error code or null. */
-function validateUpgrade({ item, inv, petals }) {
+/** Upgrade validation. Returns an error code or null.
+ * materials: { materialId: ownedQty } for the materials required at this level.
+ */
+function validateUpgrade({ item, inv, petals, materials }) {
   if (!item || !item.upgradeable) return 'not_upgradeable';
   if (!inv || (inv.quantity || 0) < 1) return 'not_owned';
   const lvl = inv.upgradeLevel || 0;
   const cost = (item.upgradeCosts || [])[lvl];
   if (lvl >= item.maxLevel || cost === undefined) return 'max_level';
   if ((petals ?? 0) < cost) return 'insufficient_petals';
+  const need = (item.upgradeMaterials || [])[lvl] || [];
+  for (const m of need) {
+    if ((materials?.[m.id] ?? 0) < (m.qty || 0)) return 'insufficient_materials';
+  }
   return null;
 }
 
