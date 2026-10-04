@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs, limit, onSnapshot, orderBy, query, startAfter } from 'firebase/firestore';
 import Protected from '../components/Protected.js';
 import { LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
 import TravelerModal from '../components/TravelerModal.js';
@@ -37,6 +37,8 @@ function fmtTime(ts) {
 function AgoraInner() {
   const { user, player } = useAuth();
   const [messages, setMessages] = useState(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -61,13 +63,60 @@ function AgoraInner() {
       (snap) => {
         const rows = [];
         snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-        setMessages(rows.reverse());
+        const latest = rows.reverse();
+        // Merge instead of replace so messages loaded via "load older"
+        // are kept when the live listener fires.
+        setMessages((prev) => {
+          const map = new Map();
+          (prev || []).forEach((m) => map.set(m.id, m));
+          latest.forEach((m) => map.set(m.id, m));
+          return [...map.values()].sort(
+            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
+          );
+        });
         setLoadError('');
       },
       () => setLoadError('Could not load the Agora.')
     );
     return unsub;
   }, [user]);
+
+  const loadOlder = async () => {
+    if (loadingMore || !hasMore) return;
+    const fb = getFirebase();
+    if (!fb?.db || !messages || messages.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldestTs = Math.min(...messages.map((m) => m.createdAt || 0));
+      const q = query(
+        collection(fb.db, 'agora_messages'),
+        orderBy('createdAt', 'desc'),
+        startAfter(oldestTs),
+        limit(PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const rows = [];
+      snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
+      if (rows.length < PAGE_SIZE) setHasMore(false);
+      if (rows.length > 0) {
+        const older = rows.reverse();
+        setMessages((prev) => {
+          const map = new Map();
+          (prev || []).forEach((m) => map.set(m.id, m));
+          older.forEach((m) => {
+            if (!map.has(m.id)) map.set(m.id, m);
+          });
+          return [...map.values()].sort(
+            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
+          );
+        });
+      }
+    } catch {
+      setLoadError('Could not load older messages.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -127,6 +176,21 @@ function AgoraInner() {
           )}
           {messages && messages.length > 0 && (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {hasMore && (
+                <li style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => {
+                      sfx.click();
+                      loadOlder();
+                    }}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? 'Loading…' : '↑ Load older messages'}
+                  </button>
+                </li>
+              )}
               {messages.map((m) => {
                 const mine = m.senderUid === user?.uid;
                 return (
