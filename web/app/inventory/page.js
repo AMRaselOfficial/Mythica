@@ -10,6 +10,7 @@ import { asset } from '../../lib/paths.js';
 import { doc, updateDoc } from 'firebase/firestore';
 import { api, newIdempotencyKey, ApiError } from '../../lib/api.js';
 import { sfx } from '../../lib/audio.js';
+import { Icon } from '../components/icons.js';
 
 export default function InventoryPage() {
   return (
@@ -106,7 +107,7 @@ function InventoryInner() {
 
       {inv && entries.length === 0 && (
         <EmptyState
-          icon="🎒"
+          icon="inventory"
           title="Nothing here yet"
           body={
             inv.length === 0
@@ -252,7 +253,7 @@ function ItemDetailModal({ itemId, invRow, inv, onClose }) {
         </p>
       )}
       <button className="btn btn-ghost btn-sm" disabled={busy} onClick={toggleFavorite}>
-        {player?.favoriteItemId === itemId ? '★ Favorited' : '☆ Mark as Favorite'}
+        {player?.favoriteItemId === itemId ? <><Icon name="star" style={{ fill: 'currentColor' }} /> Favorited</> : <><Icon name="star" /> Mark as Favorite</>}
       </button>
 
       <div className="toolbar" role="tablist" aria-label="Item actions">
@@ -314,7 +315,7 @@ function ItemDetailModal({ itemId, invRow, inv, onClose }) {
             <>
               <p>
                 Upgrade to level {level + 1} for{' '}
-                <strong style={{ color: 'var(--gold-soft)' }}>{nextCost} 🌸</strong>. You hold{' '}
+                <strong style={{ color: 'var(--gold-soft)' }}>{nextCost} <Icon name="petals" /></strong>. You hold{' '}
                 {player?.petals ?? 0} petals.
               </p>
               {nextMats.length > 0 && (
@@ -338,7 +339,7 @@ function ItemDetailModal({ itemId, invRow, inv, onClose }) {
                         >
                           <span>{mDef ? mDef.name : m.id}</span>
                           <span>
-                            {have}/{need} {ok ? '✓' : '✗'}
+                            {have}/{need} <Icon name={ok ? 'check' : 'close'} />
                           </span>
                         </li>
                       );
