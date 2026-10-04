@@ -1,276 +1,350 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
-import { collection, getDocs, limit, onSnapshot, orderBy, query, startAfter } from 'firebase/firestore';
-import Protected from '../components/Protected.js';
-import { LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
-import TravelerModal from '../components/TravelerModal.js';
-import { useAuth } from '../../contexts/AuthContext.js';
-import { getFirebase } from '../../lib/firebase.js';
-import { sfx } from '../../lib/audio.js';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AGORA_SEND_MIN_LEVEL,
-  AGORA_MESSAGE_MAX,
-  sendAgoraMessage,
-} from '../../lib/social.js';
+  collection,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  startAfter,
+} from 'firebase/firestore';
+import Protected from '../components/Protected.js';
+import { RarityTag, LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
+import { Icon } from '../components/icons.js';
+import { useAuth } from '../../contexts/AuthContext.js';
+import content, { rarityColor, itemById } from '../../lib/content.js';
+import { getFirebase } from '../../lib/firebase.js';
+import { asset } from '../../lib/paths.js';
+import { api, newIdempotencyKey, ApiError } from '../../lib/api.js';
+import { sfx } from '../../lib/audio.js';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 12;
 
-export default function AgoraPage() {
+export default function MarketplacePage() {
   return (
     <Protected>
-      <AgoraInner />
+      <MarketInner />
     </Protected>
   );
 }
 
-function fmtTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function AgoraInner() {
+function MarketInner() {
   const { user, player } = useAuth();
-  const [messages, setMessages] = useState(null);
+  const [listings, setListings] = useState(null);
+  const [lastDoc, setLastDoc] = useState(null);
   const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadError, setLoadError] = useState('');
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState('');
-  const [selectedUid, setSelectedUid] = useState(null);
-  const bottomRef = useRef(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [pendingBuy, setPendingBuy] = useState(null); // listingId
+  const [notice, setNotice] = useState('');
 
-  const level = player?.level || 1;
-  const canSpeak = level >= AGORA_SEND_MIN_LEVEL;
+  const loadPage = useCallback(
+    async (reset) => {
+      const fb = getFirebase();
+      if (!fb) return;
+      setLoading(true);
+      setError('');
+      try {
+        // Ordered by creation; status filtered client-side to avoid a composite index.
+        const parts = [collection(fb.db, 'marketplace'), orderBy('createdAt', 'desc')];
+        if (!reset && lastDoc) parts.push(startAfter(lastDoc));
+        parts.push(limit(PAGE_SIZE + 1));
+        const qq = query(...parts);
+        const { getDocs } = await import('firebase/firestore');
+        const snap = await getDocs(qq);
+        const docs = snap.docs;
+        setHasMore(docs.length > PAGE_SIZE);
+        const page = docs.slice(0, PAGE_SIZE);
+        setLastDoc(page.length ? page[page.length - 1] : null);
+        const rows = page.map((d) => ({ id: d.id, ...d.data() }));
+        setListings((prev) => (reset ? rows : [...(prev || []), ...rows]));
+      } catch (e) {
+        setError('Could not load the marketplace.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [lastDoc]
+  );
 
   useEffect(() => {
-    if (!user) return undefined;
-    const fb = getFirebase();
-    if (!fb?.db) return undefined;
-    const q = query(
-      collection(fb.db, 'agora_messages'),
-      orderBy('createdAt', 'desc'),
-      limit(PAGE_SIZE)
-    );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const rows = [];
-        snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-        const latest = rows.reverse();
-        // Merge instead of replace so messages loaded via "load older"
-        // are kept when the live listener fires.
-        setMessages((prev) => {
-          const map = new Map();
-          (prev || []).forEach((m) => map.set(m.id, m));
-          latest.forEach((m) => map.set(m.id, m));
-          return [...map.values()].sort(
-            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
-          );
-        });
-        setLoadError('');
-      },
-      () => setLoadError('Could not load the Agora.')
-    );
-    return unsub;
-  }, [user]);
+    loadPage(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const loadOlder = async () => {
-    if (loadingMore || !hasMore) return;
-    const fb = getFirebase();
-    if (!fb?.db || !messages || messages.length === 0) return;
-    setLoadingMore(true);
+  const active = useMemo(
+    () => (listings || []).filter((l) => l.status === 'active'),
+    [listings]
+  );
+  const mine = useMemo(
+    () => active.filter((l) => l.sellerUid === user?.uid),
+    [active, user]
+  );
+  const others = useMemo(
+    () => active.filter((l) => l.sellerUid !== user?.uid),
+    [active, user]
+  );
+
+  const buy = async (listing) => {
+    setPendingBuy(listing.id);
+    setNotice('');
     try {
-      const oldestTs = Math.min(...messages.map((m) => m.createdAt || 0));
-      const q = query(
-        collection(fb.db, 'agora_messages'),
-        orderBy('createdAt', 'desc'),
-        startAfter(oldestTs),
-        limit(PAGE_SIZE)
-      );
-      const snap = await getDocs(q);
-      const rows = [];
-      snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-      if (rows.length < PAGE_SIZE) setHasMore(false);
-      if (rows.length > 0) {
-        const older = rows.reverse();
-        setMessages((prev) => {
-          const map = new Map();
-          (prev || []).forEach((m) => map.set(m.id, m));
-          older.forEach((m) => {
-            if (!map.has(m.id)) map.set(m.id, m);
-          });
-          return [...map.values()].sort(
-            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
-          );
-        });
+      const res = await api.marketPurchase(listing.id, newIdempotencyKey());
+      sfx.purchase();
+      setNotice(<>You bought {res.quantity > 1 ? res.quantity + '× ' : ''}{itemById(res.itemId)?.name || 'item'} for {res.price} <Icon name="petals" />!</>);
+      setListings((prev) => (prev || []).filter((l) => l.id !== listing.id));
+    } catch (err) {
+      sfx.error();
+      setNotice(err.message || 'Purchase failed.');
+      if (err instanceof ApiError && err.code === 'listing_unavailable') {
+        setListings((prev) => (prev || []).filter((l) => l.id !== listing.id));
       }
-    } catch {
-      setLoadError('Could not load older messages.');
     } finally {
-      setLoadingMore(false);
+      setPendingBuy(null);
     }
   };
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages?.length]);
-
-  const send = async (e) => {
-    e.preventDefault();
-    if (!canSpeak || sending) return;
-    setSending(true);
-    setSendError('');
+  const cancel = async (listing) => {
+    if (!confirm(`Cancel your listing for "${itemById(listing.itemId)?.name || listing.itemId}"? Your items will be returned to your satchel.`)) return;
     try {
-      await sendAgoraMessage({
-        senderUid: user.uid,
-        senderName: player?.displayName || 'Traveler',
-        senderLevel: level,
-        text,
-      });
+      await api.marketCancel(listing.id);
       sfx.click();
-      setText('');
-    } catch (err) {
+      setNotice('Listing canceled — items returned to your satchel.');
+      setListings((prev) => (prev || []).filter((l) => l.id !== listing.id));
+    } catch (e) {
       sfx.error();
-      setSendError(err.message || 'Could not send your message.');
-    } finally {
-      setSending(false);
+      setNotice(e.message || 'Could not cancel the listing.');
     }
   };
 
   return (
     <div className="page">
-      <h1 className="serif">🏛️ Agora</h1>
-      <p style={{ color: 'var(--ink-dim)', marginTop: '-0.5rem' }}>
-        The public square — every traveler gathers here.
-        {!canSpeak && (
-          <> Reach <strong>level {AGORA_SEND_MIN_LEVEL}</strong> to speak; until then you can read along.</>
-        )}
+      <h1 className="serif">Marketplace</h1>
+      <p style={{ color: 'var(--ink-dim)' }}>
+        Fellow travelers list their finds here. You hold{' '}
+        <strong style={{ color: 'var(--gold-soft)' }}>{player?.petals ?? 0} <Icon name="petals" /></strong>.
       </p>
 
-      <div
-        className="card"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          height: 'min(62vh, 560px)',
-          padding: 0,
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-          {!messages && !loadError && <LoadingBlock label="Listening to the square" />}
-          {loadError && <ErrorNotice message={loadError} />}
-          {messages && messages.length === 0 && (
-            <EmptyState
-              icon="🏛️"
-              title="Quiet… for now"
-              body="Be the first voice in the Agora."
-            />
-          )}
-          {messages && messages.length > 0 && (
-            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-              {hasMore && (
-                <li style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => {
-                      sfx.click();
-                      loadOlder();
-                    }}
-                    disabled={loadingMore}
-                  >
-                    {loadingMore ? 'Loading…' : '↑ Load older messages'}
-                  </button>
-                </li>
-              )}
-              {messages.map((m) => {
-                const mine = m.senderUid === user?.uid;
-                return (
-                  <li key={m.id} style={{ marginBottom: '0.7rem' }}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--ink-dim)' }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          sfx.click();
-                          setSelectedUid(m.senderUid);
-                        }}
-                        title="View traveler"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          padding: 0,
-                          cursor: 'pointer',
-                          color: mine ? 'var(--gold-soft)' : 'var(--link, #9db8ff)',
-                          fontWeight: 600,
-                          fontSize: '0.85rem',
-                        }}
-                      >
-                        {m.senderName || 'Traveler'}
-                      </button>
-                      {' '}· Lv {m.senderLevel ?? '—'}
-                      {' '}· {fmtTime(m.createdAt)}
-                    </div>
-                    <div style={{ marginTop: '0.15rem', overflowWrap: 'anywhere' }}>
-                      {m.text}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <div ref={bottomRef} />
+      {notice && (
+        <div className="notice notice-info" role="status">
+          {notice}
         </div>
+      )}
+      {error && <ErrorNotice message={error} onRetry={() => loadPage(true)} />}
 
-        <form
-          onSubmit={send}
-          style={{
-            display: 'flex',
-            gap: '0.5rem',
-            padding: '0.75rem 1rem',
-            borderTop: '1px solid var(--border, rgba(255,255,255,0.08))',
-          }}
-        >
-          <input
-            className="input"
-            style={{ flex: 1 }}
-            placeholder={
-              canSpeak
-                ? 'Speak to the square…'
-                : `Reach level ${AGORA_SEND_MIN_LEVEL} to speak in the Agora`
-            }
-            value={text}
-            maxLength={AGORA_MESSAGE_MAX}
-            onChange={(e) => setText(e.target.value)}
-            disabled={!canSpeak || sending}
-            aria-label="Agora message"
-          />
-          <button
-            className="btn btn-primary"
-            type="submit"
-            disabled={!canSpeak || sending || !text.trim()}
-          >
-            {sending ? 'Sending…' : 'Send'}
-          </button>
-        </form>
-      </div>
-      {sendError && <ErrorNotice message={sendError} />}
-      {!canSpeak && (
-        <p style={{ color: 'var(--ink-dim)', fontSize: '0.9rem' }}>
-          💡 Tip: complete hunts to earn XP and level up. You can still add friends from
-          travelers' profiles and chat privately in Veyra at any level.
-        </p>
+      <CreateListing onListed={() => loadPage(true)} />
+
+      <h2 className="serif">My Listings ({mine.length})</h2>
+      {mine.length === 0 ? (
+        <EmptyState icon="tag" title="No active listings" body="List something from your inventory to earn petals." />
+      ) : (
+        <div className="row-list">
+          {mine.map((l) => (
+            <ListingRow key={l.id} listing={l} mine onCancel={() => cancel(l)} />
+          ))}
+        </div>
       )}
 
-      {selectedUid && (
-        <TravelerModal uid={selectedUid} onClose={() => setSelectedUid(null)} />
+      <h2 className="serif" style={{ marginTop: '2rem' }}>
+        Browse Listings
+      </h2>
+      {listings === null && loading && <LoadingBlock label="Browsing the stalls" />}
+      {others.length === 0 && listings !== null && !loading && (
+        <EmptyState icon="marketplace" title="The stalls are empty" body="No one is selling right now. Check back after the next hunt." />
+      )}
+      <div className="row-list">
+        {others.map((l) => (
+          <ListingRow
+            key={l.id}
+            listing={l}
+            buying={pendingBuy === l.id}
+            canAfford={(player?.petals ?? 0) >= l.price}
+            onBuy={() => buy(l)}
+          />
+        ))}
+      </div>
+
+      {hasMore && listings !== null && (
+        <div className="pagination">
+          <button className="btn" onClick={() => loadPage(false)} disabled={loading}>
+            {loading ? 'Loading…' : 'Show more'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListingRow({ listing, mine, buying, canAfford, onBuy, onCancel }) {
+  const def = itemById(listing.itemId);
+  return (
+    <div className="row-item" style={{ '--rarity': rarityColor(def?.rarity) }}>
+      {def ? (
+        <img
+          className="thumb"
+          src={asset(def.image)}
+          alt={def.name}
+          loading="lazy"
+          onError={(e) => (e.currentTarget.style.display = 'none')}
+        />
+      ) : (
+        <span className="thumb" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon name="help" /></span>
+      )}
+      <div className="grow">
+        <p className="title">
+          {def?.name || listing.itemId} {listing.quantity > 1 ? `×${listing.quantity}` : ''}
+        </p>
+        <p className="sub">
+          {def && <RarityTag rarity={def.rarity} />} {listing.price} <Icon name="petals" />
+          {!mine && <span> · seller {String(listing.sellerUid || '').slice(0, 8)}…</span>}
+        </p>
+      </div>
+      {mine ? (
+        <button className="btn btn-danger btn-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      ) : (
+        <button
+          className="btn btn-primary btn-sm"
+          onClick={onBuy}
+          disabled={buying || !canAfford}
+          title={!canAfford ? 'Not enough petals' : 'Buy this listing'}
+        >
+          {buying ? 'Buying…' : <>Buy · {listing.price} <Icon name="petals" /></>}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function CreateListing({ onListed }) {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [inv, setInv] = useState([]);
+  const [itemId, setItemId] = useState('');
+  const [qty, setQty] = useState('1');
+  const [price, setPrice] = useState('10');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open || !user?.uid) return undefined;
+    let unsub;
+    try {
+      const fb = getFirebase();
+      if (!fb?.db) return undefined;
+      unsub = onSnapshot(
+        collection(fb.db, 'inventories', user.uid, 'items'),
+        (snap) => {
+          try {
+            const rows = [];
+            snap.forEach((d) => rows.push({ itemId: d.id, ...d.data() }));
+            const sellable = rows.filter((r) => {
+              const def = itemById(r.itemId);
+              return def && def.sellable && r.quantity > 0;
+            });
+            setInv(sellable);
+            if (sellable.length && !itemId) setItemId(sellable[0].itemId);
+          } catch (e) {
+            console.error('Inventory snapshot error:', e);
+          }
+        },
+        (err) => {
+          console.error('Inventory listener error:', err);
+          setError('Could not load your inventory.');
+        }
+      );
+    } catch (e) {
+      console.error('Failed to setup inventory listener:', e);
+      setError('Could not load your inventory.');
+    }
+    return () => {
+      if (unsub) unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, user]);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await api.marketList(itemId, parseInt(qty, 10), parseInt(price, 10));
+      sfx.purchase();
+      setOpen(false);
+      setQty('1');
+      setPrice('10');
+      onListed();
+    } catch (err) {
+      sfx.error();
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: '1.5rem' }}>
+      {!open ? (
+        <button className="btn btn-primary" onClick={() => { sfx.click(); setOpen(true); }}>
+          + Create Listing
+        </button>
+      ) : (
+        <form onSubmit={submit}>
+          <h3 className="serif" style={{ marginTop: 0 }}>
+            List an item for sale
+          </h3>
+          {error && <ErrorNotice message={error} />}
+          {inv.length === 0 ? (
+            <div style={{ color: 'var(--ink-dim)' }}>
+              <p style={{ margin: '0 0 0.5rem' }}>You own nothing sellable right now.</p>
+              <p style={{ margin: '0 0 0.75rem', fontSize: '0.9rem' }}>
+                Every item you find on hunts can be listed for sale — Moss Wisp, Ember Fox,
+                Thornblade, and Starfall Hammer. Head out on a hunt to stock your pack, then
+                come back here to list your finds.
+              </p>
+              <a className="btn btn-primary btn-sm" href={asset('/hunt')}>
+                Go Hunting
+              </a>
+            </div>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="mk-item">Item</label>
+                <select id="mk-item" className="input" value={itemId} onChange={(e) => setItemId(e.target.value)}>
+                  {inv.map((r) => {
+                    const def = itemById(r.itemId);
+                    return (
+                      <option key={r.itemId} value={r.itemId}>
+                        {def?.name} (×{r.quantity})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div className="field" style={{ flex: 1, minWidth: '120px' }}>
+                  <label htmlFor="mk-qty">Quantity</label>
+                  <input id="mk-qty" className="input" type="number" min="1" value={qty}
+                    onChange={(e) => setQty(e.target.value)} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: '120px' }}>
+                  <label htmlFor="mk-price">Price (petals)</label>
+                  <input id="mk-price" className="input" type="number" min="1" value={price}
+                    onChange={(e) => setPrice(e.target.value)} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.6rem' }}>
+                <button className="btn btn-primary" type="submit" disabled={busy}>
+                  {busy ? 'Listing…' : 'List for Sale'}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </form>
       )}
     </div>
   );
