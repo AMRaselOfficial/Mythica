@@ -5,10 +5,12 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
   query,
+  startAfter,
   where,
 } from 'firebase/firestore';
 import Protected from '../components/Protected.js';
@@ -43,6 +45,8 @@ function fmtTime(ts) {
   });
 }
 
+const VEYRA_PAGE_SIZE = 100;
+
 function VeyraInner() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
@@ -50,6 +54,8 @@ function VeyraInner() {
   const [profiles, setProfiles] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -135,30 +141,79 @@ function VeyraInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chats, user]);
 
-  // Active thread messages.
+  // Active thread messages. Latest PAGE first via desc+limit, reversed for
+  // display; "load older" paginates further back with startAfter.
   useEffect(() => {
     if (!user || !activeId) {
       setMessages(null);
       return undefined;
     }
+    setHasMore(true);
     const fb = getFirebase();
     if (!fb?.db) return undefined;
     const q = query(
       collection(fb.db, 'private_chats', activeId, 'messages'),
-      orderBy('createdAt', 'asc'),
-      limit(100)
+      orderBy('createdAt', 'desc'),
+      limit(VEYRA_PAGE_SIZE)
     );
     return onSnapshot(
       q,
       (snap) => {
         const rows = [];
         snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-        setMessages(rows);
+        const latest = rows.reverse();
+        // Merge instead of replace so messages loaded via "load older"
+        // are kept when the live listener fires.
+        setMessages((prev) => {
+          const map = new Map();
+          (prev || []).forEach((m) => map.set(m.id, m));
+          latest.forEach((m) => map.set(m.id, m));
+          return [...map.values()].sort(
+            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
+          );
+        });
         setError('');
       },
       () => setError('Could not load these messages.')
     );
   }, [user, activeId]);
+
+  const loadOlder = async () => {
+    if (loadingMore || !hasMore || !activeId) return;
+    const fb = getFirebase();
+    if (!fb?.db || !messages || messages.length === 0) return;
+    setLoadingMore(true);
+    try {
+      const oldestTs = Math.min(...messages.map((m) => m.createdAt || 0));
+      const q = query(
+        collection(fb.db, 'private_chats', activeId, 'messages'),
+        orderBy('createdAt', 'desc'),
+        startAfter(oldestTs),
+        limit(VEYRA_PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const rows = [];
+      snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
+      if (rows.length < VEYRA_PAGE_SIZE) setHasMore(false);
+      if (rows.length > 0) {
+        const older = rows.reverse();
+        setMessages((prev) => {
+          const map = new Map();
+          (prev || []).forEach((m) => map.set(m.id, m));
+          older.forEach((m) => {
+            if (!map.has(m.id)) map.set(m.id, m);
+          });
+          return [...map.values()].sort(
+            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
+          );
+        });
+      }
+    } catch {
+      setError('Could not load older messages.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -281,6 +336,21 @@ function VeyraInner() {
                 {!messages && <LoadingBlock label="Reading whispers" />}
                 {messages && messages.length === 0 && (
                   <p className="muted">No messages yet — say hello.</p>
+                )}
+                {messages && messages.length > 0 && hasMore && (
+                  <div style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => {
+                        sfx.click();
+                        loadOlder();
+                      }}
+                      disabled={loadingMore}
+                    >
+                      {loadingMore ? 'Loading…' : '↑ Load older messages'}
+                    </button>
+                  </div>
                 )}
                 {(messages || []).map((m) => {
                   const mine = m.senderUid === user.uid;
