@@ -4,20 +4,21 @@ import content, { rarityColor } from '../lib/content.js';
 import { asset, link } from '../lib/paths.js';
 import { useAuth } from '../contexts/AuthContext.js';
 import { sfx } from '../lib/audio.js';
+import { Icon, BigIcon } from './components/icons.js';
 
 const FEATURES = [
   {
-    icon: '🌲',
+    icon: 'forest',
     title: 'Hunt the Night Wilds',
     body: 'Venture into the mist and track sprites and weapons. Every hunt is a gamble against the dark — rare finds await the patient.',
   },
   {
-    icon: '🗡️',
+    icon: 'sword',
     title: 'Collect & Upgrade',
     body: 'Build a collection of sprites and weapons. Temper blades at the forge and raise their power through the ranks.',
   },
   {
-    icon: '🤝',
+    icon: 'trades',
     title: 'Trade & Barter',
     body: 'List finds on the marketplace or strike direct trades with fellow travelers. Petals are the coin of the realm.',
   },
@@ -39,8 +40,8 @@ export default function LandingPage() {
             onError={() => setLogoOk(false)}
           />
         ) : (
-          <div style={{ fontSize: '3.5rem' }} aria-hidden="true">
-            🌙
+          <div style={{ color: 'var(--gold-soft, #d8b36a)' }} aria-hidden="true">
+            <BigIcon name="moon" size="3.5rem" />
           </div>
         )}
         <h1>Mythica</h1>
@@ -76,8 +77,8 @@ export default function LandingPage() {
       <section className="feature-row" aria-label="Game features">
         {FEATURES.map((f) => (
           <div className="card" key={f.title}>
-            <div style={{ fontSize: '2rem' }} aria-hidden="true">
-              {f.icon}
+            <div style={{ color: 'var(--gold-soft, #d8b36a)' }} aria-hidden="true">
+              <BigIcon name={f.icon} size="2rem" />
             </div>
             <h3 className="serif">{f.title}</h3>
             <p style={{ color: 'var(--ink-dim)', marginBottom: 0 }}>{f.body}</p>
@@ -114,7 +115,7 @@ function ItemTeaser({ item }) {
           <img src={asset(item.image)} alt={item.name} loading="lazy" onError={() => setOk(false)} />
         ) : (
           <span className="art-fallback" aria-hidden="true">
-            {item.type === 'weapon' ? '⚔️' : '✨'}
+            <Icon name={item.type === 'weapon' ? 'swords' : 'sparkles'} />
           </span>
         )}
       </div>
