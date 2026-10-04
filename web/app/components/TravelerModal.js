@@ -1,4 +1,5 @@
 'use client';
+import { Icon } from './icons.js';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { link } from '../../lib/paths.js';
@@ -136,7 +137,7 @@ export default function TravelerModal({ uid, onClose }) {
             </p>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close">
-            ✕
+            <Icon name="close" />
           </button>
         </div>
 
@@ -147,12 +148,12 @@ export default function TravelerModal({ uid, onClose }) {
             {status === 'loading' && <p className="muted">Checking…</p>}
             {status === 'none' && (
               <button className="btn btn-primary btn-sm" onClick={doAdd} disabled={busy}>
-                {busy ? 'Sending…' : '➕ Add Friend'}
+                {busy ? 'Sending…' : <><Icon name="plus" /> Add Friend</>}
               </button>
             )}
             {status === 'rejected' && (
               <button className="btn btn-primary btn-sm" onClick={doAdd} disabled={busy}>
-                {busy ? 'Sending…' : '➕ Add Friend'}
+                {busy ? 'Sending…' : <><Icon name="plus" /> Add Friend</>}
               </button>
             )}
             {status === 'pending-sent' && (
@@ -160,12 +161,12 @@ export default function TravelerModal({ uid, onClose }) {
             )}
             {status === 'pending-received' && (
               <button className="btn btn-primary btn-sm" onClick={doAccept} disabled={busy}>
-                {busy ? 'Accepting…' : '✓ Accept Request'}
+                {busy ? 'Accepting…' : <><Icon name="check" /> Accept Request</>}
               </button>
             )}
             {status === 'accepted' && (
               <button className="btn btn-primary btn-sm" onClick={doMessage} disabled={busy}>
-                {busy ? 'Opening…' : '✉️ Message in Veyra'}
+                {busy ? 'Opening…' : <><Icon name="mail" /> Message in Veyra</>}
               </button>
             )}
           </div>

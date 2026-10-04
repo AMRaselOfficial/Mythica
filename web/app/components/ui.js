@@ -2,6 +2,7 @@
 import { useEffect } from 'react';
 import { rarityColor } from '../../lib/content.js';
 import { asset } from '../../lib/paths.js';
+import { Icon, BigIcon } from './icons.js';
 
 export function RarityTag({ rarity }) {
   return (
@@ -33,7 +34,7 @@ export function ItemImage({ item, className, large }) {
 export function ArtFallback({ type, style }) {
   return (
     <span className="art-fallback" style={{ display: 'none', ...style }} aria-hidden="true">
-      {type === 'weapon' ? '⚔️' : '✨'}
+      <Icon name={type === 'weapon' ? 'swords' : 'sparkles'} />
     </span>
   );
 }
@@ -63,7 +64,7 @@ export function Modal({ title, onClose, children }) {
             {title}
           </h2>
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close dialog">
-            ✕
+            <Icon name="close" />
           </button>
         </div>
         <div style={{ marginTop: '1rem' }}>{children}</div>
@@ -97,7 +98,9 @@ export function ErrorNotice({ message, onRetry }) {
 export function EmptyState({ icon, title, body }) {
   return (
     <div className="empty">
-      <div style={{ fontSize: '2.2rem', marginBottom: '0.5rem' }}>{icon || '🌑'}</div>
+      <div style={{ marginBottom: '0.5rem', color: 'var(--gold-soft, #d8b36a)' }}>
+        <BigIcon name={icon || 'moon'} />
+      </div>
       <h3 className="serif" style={{ margin: '0 0 0.4rem' }}>
         {title}
       </h3>

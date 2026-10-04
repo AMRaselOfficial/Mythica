@@ -1,4 +1,5 @@
 'use client';
+import { Icon } from './icons.js';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
@@ -202,7 +203,7 @@ export default function FriendsSection() {
                 </div>
               </div>
               <button className="btn btn-ghost btn-sm" onClick={() => doChat(f)}>
-                ✉️ Chat
+                <Icon name="mail" /> Chat
               </button>
               <button
                 className="btn btn-ghost btn-sm"

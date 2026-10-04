@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { asset, link } from '../../lib/paths.js';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { sfx, unlockAudio } from '../../lib/audio.js';
+import { Icon } from './icons.js';
 
 const LINKS = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -86,7 +87,7 @@ export default function Nav() {
             aria-expanded={menuOpen}
             onClick={toggleMenu}
           >
-            {menuOpen ? '✕' : '☰'}
+            {menuOpen ? <Icon name="close" /> : <Icon name="menu" />}
           </button>
         )}
         {user && (
@@ -107,7 +108,7 @@ export default function Nav() {
           </div>
         )}
         <div className="nav-user">
-          {user && player && <span className="petals">🌸 {player.petals ?? 0}</span>}
+          {user && player && <span className="petals"><Icon name="petals" /> {player.petals ?? 0}</span>}
           {user ? (
             <button className="btn btn-ghost btn-sm nav-signout-desktop" onClick={handleLogout}>
               Sign out
@@ -132,7 +133,7 @@ export default function Nav() {
 
 function LogoMark() {
   const [failed, setFailed] = useState(false);
-  if (failed) return <span className="brand-mark">🌙</span>;
+  if (failed) return <span className="brand-mark"><Icon name="moon" /></span>;
   return (
     <img
       src={asset('assets/logo/mythica-logo.webp')}

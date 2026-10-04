@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { api, ApiError } from '../../lib/api.js';
 import { sfx } from '../../lib/audio.js';
+import { Icon } from './icons.js';
 
 const ERROR_TEXT = {
   invalid_code: 'That code does not exist. Check the spelling and try again.',
@@ -13,13 +14,14 @@ const ERROR_TEXT = {
 
 function formatRewards(r) {
   const parts = [];
-  if (r.petals > 0) parts.push(`🌸 ${r.petals} petals`);
-  if (r.xp > 0) parts.push(`✨ ${r.xp} XP`);
-  for (const it of r.items || []) {
-    parts.push(`🎁 ${it.quantity}× ${it.name}`);
+  if (r.petals > 0) parts.push(<span key="p"><Icon name="petals" /> {r.petals} petals</span>);
+  if (r.xp > 0) parts.push(<span key="x"><Icon name="sparkles" /> {r.xp} XP</span>);
+  for (const [i, it] of (r.items || []).entries()) {
+    parts.push(<span key={'i' + i}><Icon name="gift" /> {it.quantity}× {it.name}</span>);
   }
-  if (r.leveledUp) parts.push(`🎉 Level up! Now level ${r.level}`);
-  return parts.length ? parts.join(' · ') : 'Redeemed!';
+  if (r.leveledUp) parts.push(<span key="l"><Icon name="party" /> Level up! Now level {r.level}</span>);
+  if (!parts.length) return 'Redeemed!';
+  return parts.reduce((acc, el, i) => (i === 0 ? [el] : [...acc, ' · ', el]), []);
 }
 
 /**
@@ -56,7 +58,7 @@ export default function RedeemSection() {
     <section style={{ marginTop: '1.5rem' }}>
       <div className="card">
         <h2 className="serif" style={{ marginTop: 0 }}>
-          🎟️ Redeem Code
+          <Icon name="ticket" /> Redeem Code
         </h2>
         <p className="muted" style={{ marginTop: '-0.25rem', fontSize: '0.9rem' }}>
           Have a promotional code? Enter it below to claim your rewards. Each
@@ -88,7 +90,7 @@ export default function RedeemSection() {
               fontWeight: 600,
             }}
           >
-            {result.ok ? '✅ ' : '⚠️ '}{result.text}
+            {result.ok ? <Icon name="success" /> : <Icon name="warning" />} {result.text}
           </p>
         )}
       </div>
