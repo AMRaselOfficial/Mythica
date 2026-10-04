@@ -65,7 +65,7 @@ function InventoryInner() {
       <h1 className="serif">Inventory</h1>
 
       <div className="toolbar" role="toolbar" aria-label="Inventory filters">
-        {['all', 'sprite', 'weapon'].map((t) => (
+        {['all', 'sprite', 'weapon', 'material'].map((t) => (
           <button
             key={t}
             className="chip"
@@ -75,7 +75,7 @@ function InventoryInner() {
               setTypeFilter(t);
             }}
           >
-            {t === 'all' ? 'All' : t === 'sprite' ? 'Sprites' : 'Weapons'}
+            {t === 'all' ? 'All' : t === 'sprite' ? 'Sprites' : t === 'weapon' ? 'Weapons' : 'Materials'}
           </button>
         ))}
         <select
@@ -148,6 +148,7 @@ function InventoryInner() {
         <ItemDetailModal
           itemId={selected}
           invRow={(inv || []).find((r) => r.itemId === selected)}
+          inv={inv || []}
           onClose={() => setSelected(null)}
         />
       )}
@@ -155,7 +156,7 @@ function InventoryInner() {
   );
 }
 
-function ItemDetailModal({ itemId, invRow, onClose }) {
+function ItemDetailModal({ itemId, invRow, inv, onClose }) {
   const def = itemById(itemId);
   const { player, user } = useAuth();
   const [tab, setTab] = useState('info'); // info|sell|upgrade
@@ -170,6 +171,10 @@ function ItemDetailModal({ itemId, invRow, onClose }) {
   const level = (invRow?.upgradeLevel ?? 0) + 1;
   const canUpgradeMore = def.upgradeable && level < def.maxLevel;
   const nextCost = canUpgradeMore ? def.upgradeCosts[level - 1] : null;
+  const nextMats = canUpgradeMore ? def.upgradeMaterials?.[level - 1] || [] : [];
+  const matOwned = (id) => (inv || []).find((r) => r.itemId === id)?.quantity ?? 0;
+  const matsReady = nextMats.every((m) => matOwned(m.id) >= (m.qty || 0));
+  const canAfford = (player?.petals ?? 0) >= (nextCost ?? 0) && matsReady;
 
   const say = (kind, text) => {
     setMsgKind(kind);
@@ -312,9 +317,43 @@ function ItemDetailModal({ itemId, invRow, onClose }) {
                 <strong style={{ color: 'var(--gold-soft)' }}>{nextCost} 🌸</strong>. You hold{' '}
                 {player?.petals ?? 0} petals.
               </p>
+              {nextMats.length > 0 && (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '0.35rem' }}>Materials needed:</div>
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                    {nextMats.map((m) => {
+                      const mDef = itemById(m.id);
+                      const have = matOwned(m.id);
+                      const need = m.qty || 0;
+                      const ok = have >= need;
+                      return (
+                        <li
+                          key={m.id}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            padding: '0.25rem 0',
+                            color: ok ? 'inherit' : 'var(--danger, #e35d6a)',
+                          }}
+                        >
+                          <span>{mDef ? mDef.name : m.id}</span>
+                          <span>
+                            {have}/{need} {ok ? '✓' : '✗'}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {!matsReady && (
+                    <p className="muted" style={{ fontSize: '0.85rem' }}>
+                      Hunt for upgrade materials to gather what you lack.
+                    </p>
+                  )}
+                </div>
+              )}
               <button
                 className="btn btn-primary"
-                disabled={busy || (player?.petals ?? 0) < nextCost}
+                disabled={busy || !canAfford}
                 onClick={doUpgrade}
               >
                 {busy ? 'Upgrading…' : `Upgrade to Lv ${level + 1}`}
