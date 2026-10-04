@@ -193,26 +193,9 @@ function VeyraInner() {
       </p>
       {error && <ErrorNotice message={error} />}
 
-      <div
-        className="card"
-        style={{
-          display: 'flex',
-          minHeight: 'min(62vh, 560px)',
-          padding: 0,
-          overflow: 'hidden',
-          flexWrap: 'wrap',
-        }}
-      >
+      <div className={`card veyra-shell${activeId ? ' veyra-thread-open' : ''}`}>
         {/* Chat list */}
-        <div
-          style={{
-            width: '240px',
-            minWidth: '200px',
-            borderRight: '1px solid var(--border, rgba(255,255,255,0.08))',
-            overflowY: 'auto',
-            maxHeight: '62vh',
-          }}
-        >
+        <div className="veyra-list">
           {!chats && <LoadingBlock label="Finding conversations" />}
           {chats && chats.length === 0 && (
             <p className="muted" style={{ padding: '1rem', fontSize: '0.9rem' }}>
@@ -262,7 +245,7 @@ function VeyraInner() {
         </div>
 
         {/* Thread */}
-        <div style={{ flex: 1, minWidth: '260px', display: 'flex', flexDirection: 'column' }}>
+        <div className="veyra-thread">
           {!activeId && (
             <div style={{ padding: '2rem', textAlign: 'center' }} className="muted">
               <EmptyState
@@ -274,16 +257,27 @@ function VeyraInner() {
           )}
           {activeId && (
             <>
-              <div
-                style={{
-                  padding: '0.75rem 1rem',
-                  borderBottom: '1px solid var(--border, rgba(255,255,255,0.08))',
-                  fontWeight: 600,
-                }}
-              >
-                {partnerName}
+              <div className="veyra-thread-head">
+                <button
+                  type="button"
+                  className="veyra-back"
+                  onClick={() => {
+                    sfx.click();
+                    setActiveId(null);
+                  }}
+                  aria-label="Back to conversations"
+                >
+                  ←
+                </button>
+                <div className="veyra-avatar" aria-hidden="true">
+                  {(partnerName || 'T').charAt(0).toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div className="veyra-partner-name">{partnerName}</div>
+                  <div className="veyra-partner-sub">Private whisper</div>
+                </div>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '1rem', maxHeight: '46vh' }}>
+              <div className="veyra-messages">
                 {!messages && <LoadingBlock label="Reading whispers" />}
                 {messages && messages.length === 0 && (
                   <p className="muted">No messages yet — say hello.</p>
