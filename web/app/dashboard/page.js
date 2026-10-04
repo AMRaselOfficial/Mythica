@@ -1,182 +1,67 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { useCallback, useEffect, useState } from 'react';
 import Protected from '../components/Protected.js';
-import { RarityTag, LoadingBlock, EmptyState } from '../components/ui.js';
-import { useAuth } from '../../contexts/AuthContext.js';
-import content, { rarityColor, itemById } from '../../lib/content.js';
-import { getFirebase } from '../../lib/firebase.js';
-import { asset, link } from '../../lib/paths.js';
-import { xpProgress } from '../../lib/xp.js';
-import { sfx } from '../../lib/audio.js';
+import { LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
+import { Icon, BigIcon } from '../components/icons.js';
+import content from '../../lib/content.js';
+import { api } from '../../lib/api.js';
+import { asset } from '../../lib/paths.js';
 
-export default function DashboardPage() {
-  return (
-    <Protected>
-      <DashboardInner />
-    </Protected>
-  );
+/** Resolve cover art: full URLs pass through, repo paths go through asset(). */
+export function coverSrc(banner) {
+  const b = String(banner || '').trim();
+  if (!b) return '';
+  if (/^https?:\/\//i.test(b)) return b;
+  return asset(b);
 }
 
-function DashboardInner() {
-  const { player } = useAuth();
-  const [recent, setRecent] = useState(null);
-  const [totalItems, setTotalItems] = useState(0);
-
-  const uid = useAuthUid();
-  useEffect(() => {
-    if (!uid) return undefined;
-    const fb = getFirebase();
-    if (!fb) return undefined;
-    const q = query(
-      collection(fb.db, 'inventories', uid, 'items'),
-      orderBy('obtainedAt', 'desc'),
-      limit(6)
-    );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const rows = [];
-        let total = 0;
-        snap.forEach((d) => {
-          rows.push({ itemId: d.id, ...d.data() });
-          total += d.data().quantity || 0;
-        });
-        setRecent(rows);
-        setTotalItems(total);
-      },
-      () => setRecent([])
-    );
-    return unsub;
-  }, [uid]);
-
-  const featured = (content.events || []).find((e) => e.featured && e.active) ||
-    (content.events || []).find((e) => e.active);
-  const pct = player ? xpProgress(player.level || 1, player.xp || 0) : null;
-
-  return (
-    <div className="page">
-      <h1 className="serif">
-        Welcome back, {player?.displayName || 'traveler'}
-      </h1>
-
-      <div className="stat-row">
-        <div className="stat">
-          <div className="label">Petals</div>
-          <div className="value" style={{ color: 'var(--gold-soft)' }}>
-            🌸 {player?.petals ?? 0}
-          </div>
-        </div>
-        <div className="stat">
-          <div className="label">Level</div>
-          <div className="value">{player?.level ?? 1}</div>
-        </div>
-        <div className="stat" style={{ flex: 1, minWidth: '200px' }}>
-          <div className="label">
-            XP — {player?.xp ?? 0} / {pct?.need ?? '—'}
-          </div>
-          <div className="xp-bar" role="progressbar" aria-valuenow={Math.round(pct?.pct || 0)}
-            aria-valuemin="0" aria-valuemax="100" aria-label="Experience progress">
-            <div style={{ width: `${pct?.pct || 0}%` }} />
-          </div>
-        </div>
-        <div className="stat">
-          <div className="label">Collection</div>
-          <div className="value">{totalItems}</div>
-        </div>
-      </div>
-
-      <h2 className="serif">Quick Actions</h2>
-      <div className="toolbar">
-        <a className="btn btn-primary" href={link('/hunt')} onClick={() => sfx.click()}>
-          🌙 Hunt
-        </a>
-        <a className="btn" href={link('/inventory')} onClick={() => sfx.click()}>
-          🎒 Inventory
-        </a>
-        <a className="btn" href={link('/marketplace')} onClick={() => sfx.click()}>
-          🪙 Marketplace
-        </a>
-        <a className="btn" href={link('/trades')} onClick={() => sfx.click()}>
-          🤝 Trades
-        </a>
-        <a className="btn" href={link('/agora')} onClick={() => sfx.click()}>
-          🏛️ Agora
-        </a>
-        <a className="btn" href={link('/veyra')} onClick={() => sfx.click()}>
-          ✉️ Veyra
-        </a>
-      </div>
-
-      {featured && (
-        <section aria-label="Featured event" style={{ marginTop: '1.5rem' }}>
-          <h2 className="serif">Featured Event</h2>
-          <EventBanner event={featured} />
-        </section>
-      )}
-
-      <section style={{ marginTop: '1.5rem' }}>
-        <h2 className="serif">Recent Discoveries</h2>
-        {!recent && <LoadingBlock label="Checking your satchel" />}
-        {recent && recent.length === 0 && (
-          <EmptyState
-            icon="🔍"
-            title="No discoveries yet"
-            body="Your first hunt awaits. The wilds are generous to the bold."
-          />
-        )}
-        {recent && recent.length > 0 && (
-          <div className="grid">
-            {recent.map((r) => {
-              const def = itemById(r.itemId);
-              if (!def) return null;
-              return (
-                <div
-                  key={r.itemId}
-                  className="item-card"
-                  style={{ '--rarity': rarityColor(def.rarity), cursor: 'default' }}
-                >
-                  <div className="art">
-                    <img
-                      src={asset(def.image)}
-                      alt={def.name}
-                      loading="lazy"
-                      onError={(e) => (e.currentTarget.style.display = 'none')}
-                    />
-                  </div>
-                  <div className="meta">
-                    <p className="name">{def.name}</p>
-                    <RarityTag rarity={def.rarity} /> <span className="qty-badge">×{r.quantity}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-    </div>
-  );
+function fmtDate(ms) {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
-function useAuthUid() {
-  const { user } = useAuth();
-  return user?.uid || null;
+function challengeText(ev) {
+  if (ev.type === 'invite_friends') return `Invite ${ev.goal} friend${ev.goal === 1 ? '' : 's'}`;
+  if (ev.type === 'minigame') return 'Mini-game challenge';
+  return `Hunt ${ev.goal} time${ev.goal === 1 ? '' : 's'}`;
 }
 
-export function EventBanner({ event }) {
-  const [ok, setOk] = useState(true);
-  const now = Date.now();
-  const start = event.startAt ? new Date(event.startAt).getTime() : 0;
-  const end = event.endAt ? new Date(event.endAt).getTime() : 0;
-  const live = (!start || now >= start) && (!end || now <= end);
+function rewardsText(rewards) {
+  const parts = [];
+  if (rewards.petals) parts.push(<span key="p"><Icon name="petals" /> {rewards.petals}</span>);
+  if (rewards.xp) parts.push(<span key="x"><Icon name="sparkles" /> {rewards.xp} XP</span>);
+  for (const [i, it] of (rewards.items || []).entries()) {
+    parts.push(<span key={'i' + i}><Icon name="gift" /> {it.name || it.itemId} ×{it.quantity}</span>);
+  }
+  if (!parts.length) return 'Mystery rewards';
+  return parts.reduce((acc, el, i) => (i === 0 ? [el] : [...acc, ' · ', el]), []);
+}
+
+function EventCard({ event: ev, onJoin, onClaim, busy }) {
+  const [imgOk, setImgOk] = useState(true);
+  const src = coverSrc(ev.banner);
+  const pct = ev.goal ? Math.min(100, Math.round(((ev.progress || 0) / ev.goal) * 100)) : 0;
+  const badge = ev.claimed
+    ? 'Claimed'
+    : ev.live
+      ? 'Live'
+      : ev.ended
+        ? 'Ended'
+        : 'Upcoming';
+  const badgeColor = ev.live && !ev.claimed ? 'var(--success)' : 'var(--ink-faint)';
+
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      {ok && event.banner ? (
+      {imgOk && src ? (
         <img
-          src={asset(event.banner)}
-          alt={event.title}
+          src={src}
+          alt={ev.title}
           style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }}
-          onError={() => setOk(false)}
+          onError={() => setImgOk(false)}
         />
       ) : (
         <div
@@ -187,31 +72,221 @@ export function EventBanner({ event }) {
             justifyContent: 'center',
             fontSize: '3rem',
             background: 'linear-gradient(135deg, #1a2340, #0d1226)',
+            color: 'var(--gold-soft, #d8b36a)',
           }}
           aria-hidden="true"
         >
-          🌊
+          <BigIcon name="events" size="3rem" />
         </div>
       )}
       <div style={{ padding: '1.25rem' }}>
         <h3 className="serif" style={{ margin: '0 0 0.4rem' }}>
-          {event.title}{' '}
-          <span
-            className="rarity-tag"
-            style={{ '--rarity': live ? 'var(--success)' : 'var(--ink-faint)' }}
-          >
-            {live ? 'Live' : 'Ended'}
+          {ev.title}{' '}
+          <span className="rarity-tag" style={{ '--rarity': badgeColor }}>
+            {badge}
           </span>
         </h3>
-        <p style={{ color: 'var(--ink-dim)', margin: '0 0 0.5rem' }}>{event.description}</p>
-        {(event.rewards || []).length > 0 && (
-          <p className="qty-badge" style={{ margin: 0 }}>
-            Rewards:{' '}
-            {event.rewards
-              .map((r) => `${r.quantity > 1 ? r.quantity + '× ' : ''}${itemById(r.itemId)?.name || r.itemId}`)
-              .join(', ')}
-          </p>
+        <p style={{ color: 'var(--ink-dim)', fontSize: '0.85rem', margin: '0 0 0.5rem' }}>
+          {fmtDate(ev.startAt)} → {fmtDate(ev.endAt)} · {ev.typeLabel || challengeText(ev)}
+        </p>
+        {ev.description && (
+          <p style={{ color: 'var(--ink-dim)', margin: '0 0 0.75rem' }}>{ev.description}</p>
         )}
+        <p style={{ margin: '0 0 0.75rem' }}>
+          <strong>Challenge:</strong> {challengeText(ev)}
+          <br />
+          <strong>Rewards:</strong> {rewardsText(ev.rewards || {})}
+        </p>
+
+        {ev.type === 'minigame' ? (
+          <p className="muted"><Icon name="gamepad" /> The mini-game for this event is arriving soon.</p>
+        ) : !ev.joined && ev.live ? (
+          <button className="btn btn-primary" disabled={busy} onClick={() => onJoin(ev)}>
+            {busy ? 'Joining…' : 'Join event'}
+          </button>
+        ) : ev.joined ? (
+          <div>
+            <div
+              style={{
+                height: 10,
+                borderRadius: 6,
+                background: 'var(--surface-2)',
+                overflow: 'hidden',
+                marginBottom: '0.4rem',
+              }}
+            >
+              <div
+                style={{
+                  width: `${pct}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, var(--accent), var(--accent-2))',
+                  transition: 'width 0.4s',
+                }}
+              />
+            </div>
+            <p style={{ margin: '0 0 0.6rem', fontSize: '0.9rem' }}>
+              Progress: <strong>{ev.progress || 0} / {ev.goal}</strong>
+              {ev.completed && !ev.claimed && <> — complete! <Icon name="party" /></>}
+            </p>
+            {ev.completed && !ev.claimed && (
+              <button className="btn btn-primary" disabled={busy} onClick={() => onClaim(ev)}>
+                {busy ? 'Claiming…' : 'Claim rewards'}
+              </button>
+            )}
+            {ev.claimed && <p style={{ color: 'var(--success)', margin: 0 }}><Icon name="success" /> Rewards claimed</p>}
+          </div>
+        ) : (
+          <p className="muted">{ev.ended ? 'This event has ended.' : 'This event has not started yet.'}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function EventsPage() {
+  return (
+    <Protected>
+      <EventsInner />
+    </Protected>
+  );
+}
+
+function EventsInner() {
+  const [events, setEvents] = useState(null);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busyId, setBusyId] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api.events();
+      setEvents(data.events || []);
+    } catch {
+      // Fall back to bundled content events (read-only legacy display).
+      setError('Could not reach the event board — showing tale records instead.');
+      setEvents((content.events || []).map((e) => ({ ...e, legacy: true })));
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const onJoin = async (ev) => {
+    setBusyId(ev.id);
+    setNotice('');
+    try {
+      await api.eventJoin(ev.id);
+      setNotice(<><Icon name="success" /> You joined \u201c{ev.title}\u201d!</>);
+      await load();
+    } catch (e) {
+      setNotice(<><Icon name="warning" /> {e.message || 'Could not join the event.'}</>);
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const onClaim = async (ev) => {
+    setBusyId(ev.id);
+    setNotice('');
+    try {
+      const out = await api.eventClaim(ev.id);
+      const r = out.rewards || {};
+      const parts = [];
+      if (r.petals) parts.push(<span key="p"><Icon name="petals" /> {r.petals}</span>);
+      if (r.xp) parts.push(<span key="x"><Icon name="sparkles" /> {r.xp} XP{r.leveledUp ? ' (level up!)' : ''}</span>);
+      for (const [i, it] of (r.items || []).entries()) {
+        parts.push(<span key={'i' + i}><Icon name="gift" /> {it.name} ×{it.quantity}</span>);
+      }
+      setNotice(
+        <><Icon name="success" /> Rewards claimed:{' '}
+          {parts.length ? parts.reduce((acc, el, i) => (i === 0 ? [el] : [...acc, ' · ', el]), []) : 'nothing'}
+        </>
+      );
+      await load();
+    } catch (e) {
+      setNotice(<><Icon name="warning" /> {e.message || 'Could not claim rewards.'}</>);
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  return (
+    <div className="page">
+      <h1 className="serif">Events</h1>
+      <p style={{ color: 'var(--ink-dim)' }}>
+        Seasonal stirrings in the realm — join limited-time challenges and earn rewards.
+      </p>
+
+      {error && <ErrorNotice message={error} />}
+      {notice && (
+        <p
+          style={{
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            padding: '0.6rem 0.9rem',
+          }}
+        >
+          {notice}
+        </p>
+      )}
+      {!events && <LoadingBlock label="Reading the event board" />}
+      {events && events.length === 0 && (
+        <EmptyState icon="scroll" title="No events" body="The realm is quiet for now. Check back soon." />
+      )}
+      {events && events.length > 0 && (
+        <div className="grid-cards">
+          {events.map((e) =>
+            e.legacy ? (
+              <LegacyEventCard key={e.id || e.title} event={e} />
+            ) : (
+              <EventCard
+                key={e.id}
+                event={e}
+                onJoin={onJoin}
+                onClaim={onClaim}
+                busy={busyId === e.id}
+              />
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only card for legacy bundled events when the API is unreachable. */
+function LegacyEventCard({ event: e }) {
+  const [imgOk, setImgOk] = useState(true);
+  const src = coverSrc(e.banner);
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {imgOk && src ? (
+        <img
+          src={src}
+          alt={e.title}
+          style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', display: 'block' }}
+          onError={() => setImgOk(false)}
+        />
+      ) : (
+        <div
+          style={{
+            aspectRatio: '16/9',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, #1a2340, #0d1226)',
+            color: 'var(--gold-soft, #d8b36a)',
+          }}
+          aria-hidden="true"
+        >
+          <BigIcon name="waves" size="3rem" />
+        </div>
+      )}
+      <div style={{ padding: '1.25rem' }}>
+        <h3 className="serif" style={{ margin: '0 0 0.4rem' }}>{e.title}</h3>
+        <p style={{ color: 'var(--ink-dim)' }}>{e.description}</p>
       </div>
     </div>
   );
