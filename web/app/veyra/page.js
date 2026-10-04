@@ -1,427 +1,438 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  addDoc,
   collection,
   doc,
-  getDoc,
-  getDocs,
-  limit,
   onSnapshot,
-  orderBy,
   query,
-  startAfter,
+  serverTimestamp,
+  updateDoc,
   where,
 } from 'firebase/firestore';
 import Protected from '../components/Protected.js';
-import { LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
+import { RarityTag, LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
+import { Icon } from '../components/icons.js';
 import { useAuth } from '../../contexts/AuthContext.js';
+import content, { itemById, rarityColor } from '../../lib/content.js';
 import { getFirebase } from '../../lib/firebase.js';
+import { api, newIdempotencyKey, ApiError } from '../../lib/api.js';
 import { sfx } from '../../lib/audio.js';
-import {
-  VEYRA_MESSAGE_MAX,
-  getPublicProfile,
-  openPrivateChat,
-  otherUid,
-  pairId,
-  sendPrivateMessage,
-} from '../../lib/social.js';
 
-export default function VeyraPage() {
+export default function TradesPage() {
   return (
     <Protected>
-      <VeyraInner />
+      <TradesInner />
     </Protected>
   );
 }
 
-function fmtTime(ts) {
-  if (!ts) return '';
-  return new Date(ts).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-const VEYRA_PAGE_SIZE = 100;
-
-function VeyraInner() {
+function TradesInner() {
   const { user } = useAuth();
-  const searchParams = useSearchParams();
-  const [chats, setChats] = useState(null);
-  const [profiles, setProfiles] = useState({});
-  const [activeId, setActiveId] = useState(null);
-  const [messages, setMessages] = useState(null);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
+  const [trades, setTrades] = useState(null);
   const [error, setError] = useState('');
-  const bottomRef = useRef(null);
+  const [notice, setNotice] = useState('');
+  const [busyId, setBusyId] = useState(null);
 
-  const openChatWith = useCallback(
-    async (theirUid) => {
-      if (!user || !theirUid || theirUid === user.uid) return;
-      setError('');
-      try {
-        const chatId = await openPrivateChat(user.uid, theirUid);
-        setActiveId(chatId);
-      } catch (e) {
-        // Most likely: not friends yet (rules enforce friends-only chats).
-        setError(e.message || 'Could not open this chat.');
-      }
-    },
-    [user]
-  );
-
-  // Deep link: /veyra?chat=<otherUid> opens (or creates) that private chat.
-  useEffect(() => {
-    const target = searchParams?.get('chat');
-    if (target && user) {
-      // `chat` may be a uid (from Message buttons) or a chat doc id.
-      if (target.includes('_')) setActiveId(target);
-      else openChatWith(target);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, user]);
-
-  // Chat list. NOTE: no orderBy here — array-contains + orderBy needs a
-  // Firestore composite index; we sort the (small) result client-side instead.
   useEffect(() => {
     if (!user) return undefined;
     const fb = getFirebase();
-    if (!fb?.db) return undefined;
-    const q = query(
-      collection(fb.db, 'private_chats'),
-      where('participants', 'array-contains', user.uid),
-      limit(30)
-    );
-    return onSnapshot(
-      q,
-      (snap) => {
-        const rows = [];
-        snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-        rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-        setChats(rows);
+    if (!fb) return undefined;
+    const col = collection(fb.db, 'trades');
+    // NOTE: no orderBy here — where+orderBy on different fields needs a
+    // Firestore composite index. The merge() below sorts client-side instead
+    // (same pattern as the Veyra chat list).
+    const qBy = query(col, where('offeredBy', '==', user.uid));
+    const qTo = query(col, where('offeredTo', '==', user.uid));
+    let a = [],
+      b = [];
+    const merge = () => {
+      const map = new Map();
+      [...a, ...b].forEach((t) => map.set(t.id, t));
+      setTrades([...map.values()].sort((x, y) => (y.createdAtMs || 0) - (x.createdAtMs || 0)));
+    };
+    const toMs = (t) => (t && typeof t.toMillis === 'function' ? t.toMillis() : 0);
+    const un1 = onSnapshot(
+      qBy,
+      (s) => {
+        a = s.docs.map((d) => ({ id: d.id, ...d.data(), createdAtMs: toMs(d.data().createdAt) }));
+        merge();
       },
-      (err) => {
-        console.error('Veyra chat list error:', err);
-        setChats([]);
-      }
+      () => setError('Could not load trades.')
     );
+    const un2 = onSnapshot(
+      qTo,
+      (s) => {
+        b = s.docs.map((d) => ({ id: d.id, ...d.data(), createdAtMs: toMs(d.data().createdAt) }));
+        merge();
+      },
+      () => setError('Could not load trades.')
+    );
+    return () => {
+      un1();
+      un2();
+    };
   }, [user]);
 
-  // Resolve display names for chat partners.
-  useEffect(() => {
-    if (!user || !chats) return;
-    const missing = chats
-      .map((c) => otherUid(c.id, user.uid))
-      .filter((u) => u && !profiles[u]);
-    if (!missing.length) return;
-    let cancelled = false;
-    (async () => {
-      const next = {};
-      await Promise.all(
-        missing.map(async (u) => {
-          try {
-            const p = await getPublicProfile(u);
-            if (p) next[u] = p;
-          } catch {
-            /* leave unresolved */
-          }
-        })
-      );
-      if (!cancelled) setProfiles((prev) => ({ ...prev, ...next }));
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chats, user]);
+  const incoming = useMemo(
+    () => (trades || []).filter((t) => t.offeredTo === user?.uid),
+    [trades, user]
+  );
+  const outgoing = useMemo(
+    () => (trades || []).filter((t) => t.offeredBy === user?.uid),
+    [trades, user]
+  );
 
-  // Active thread messages. Latest PAGE first via desc+limit, reversed for
-  // display; "load older" paginates further back with startAfter.
-  useEffect(() => {
-    if (!user || !activeId) {
-      setMessages(null);
-      return undefined;
-    }
-    setHasMore(true);
-    const fb = getFirebase();
-    if (!fb?.db) return undefined;
-    const q = query(
-      collection(fb.db, 'private_chats', activeId, 'messages'),
-      orderBy('createdAt', 'desc'),
-      limit(VEYRA_PAGE_SIZE)
-    );
-    return onSnapshot(
-      q,
-      (snap) => {
-        const rows = [];
-        snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-        const latest = rows.reverse();
-        // Merge instead of replace so messages loaded via "load older"
-        // are kept when the live listener fires.
-        setMessages((prev) => {
-          const map = new Map();
-          (prev || []).forEach((m) => map.set(m.id, m));
-          latest.forEach((m) => map.set(m.id, m));
-          return [...map.values()].sort(
-            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
-          );
-        });
-        setError('');
-      },
-      () => setError('Could not load these messages.')
-    );
-  }, [user, activeId]);
-
-  const loadOlder = async () => {
-    if (loadingMore || !hasMore || !activeId) return;
-    const fb = getFirebase();
-    if (!fb?.db || !messages || messages.length === 0) return;
-    setLoadingMore(true);
+  const act = async (trade, fn, okMsg) => {
+    setBusyId(trade.id);
+    setNotice('');
     try {
-      const oldestTs = Math.min(...messages.map((m) => m.createdAt || 0));
-      const q = query(
-        collection(fb.db, 'private_chats', activeId, 'messages'),
-        orderBy('createdAt', 'desc'),
-        startAfter(oldestTs),
-        limit(VEYRA_PAGE_SIZE)
-      );
-      const snap = await getDocs(q);
-      const rows = [];
-      snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-      if (rows.length < VEYRA_PAGE_SIZE) setHasMore(false);
-      if (rows.length > 0) {
-        const older = rows.reverse();
-        setMessages((prev) => {
-          const map = new Map();
-          (prev || []).forEach((m) => map.set(m.id, m));
-          older.forEach((m) => {
-            if (!map.has(m.id)) map.set(m.id, m);
-          });
-          return [...map.values()].sort(
-            (a, b) => (a.createdAt || 0) - (b.createdAt || 0)
-          );
-        });
-      }
-    } catch {
-      setError('Could not load older messages.');
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages?.length, activeId]);
-
-  const send = async (e) => {
-    e.preventDefault();
-    if (sending || !activeId) return;
-    setSending(true);
-    setError('');
-    try {
-      await sendPrivateMessage(activeId, user.uid, text);
+      await fn();
       sfx.click();
-      setText('');
-    } catch (err) {
+      if (okMsg) setNotice(okMsg);
+    } catch (e) {
       sfx.error();
-      setError(err.message || 'Could not send your message.');
+      setNotice(e.message || 'Action failed.');
     } finally {
-      setSending(false);
+      setBusyId(null);
     }
   };
 
-  const activeChat = (chats || []).find((c) => c.id === activeId);
-  const partnerUid = activeChat ? otherUid(activeChat.id, user?.uid) : null;
-  const partnerName = (partnerUid && profiles[partnerUid]?.displayName) || 'Traveler';
+  const accept = (t) =>
+    act(t, async () => {
+      const fb = getFirebase();
+      await updateDoc(doc(fb.db, 'trades', t.id), { status: 'accepted', acceptedAt: serverTimestamp() });
+    }, 'Trade accepted! Complete it to swap items.');
+
+  const decline = (t) =>
+    act(t, async () => {
+      const fb = getFirebase();
+      await updateDoc(doc(fb.db, 'trades', t.id), { status: 'canceled' });
+    });
+
+  const cancel = decline;
+
+  const complete = (t) =>
+    act(t, async () => {
+      const res = await api.tradesComplete(t.id, newIdempotencyKey());
+      if (res && res.ok === false) throw new ApiError(res.error, res.message);
+      sfx.purchase();
+      setNotice('Trade completed — items swapped!');
+    });
 
   return (
     <div className="page">
-      <h1 className="serif">✉️ Veyra</h1>
-      <p style={{ color: 'var(--ink-dim)', marginTop: '-0.5rem' }}>
-        Private whispers — only friends can speak here.
+      <h1 className="serif">Trades</h1>
+      <p style={{ color: 'var(--ink-dim)' }}>
+        Strike a bargain directly with another traveler. Both sides confirm, then the swap is sealed
+        by the game server.
       </p>
+
+      {notice && (
+        <div className="notice notice-info" role="status">
+          {notice}
+        </div>
+      )}
       {error && <ErrorNotice message={error} />}
 
-      <div className={`card veyra-shell${activeId ? ' veyra-thread-open' : ''}`}>
-        {/* Chat list */}
-        <div className="veyra-list">
-          {!chats && <LoadingBlock label="Finding conversations" />}
-          {chats && chats.length === 0 && (
-            <p className="muted" style={{ padding: '1rem', fontSize: '0.9rem' }}>
-              No conversations yet. Add friends from the Agora or their traveler
-              codes, then say hello.
-            </p>
-          )}
-          {(chats || []).map((c) => {
-            const other = otherUid(c.id, user.uid);
-            const name = profiles[other]?.displayName || 'Traveler';
-            const selected = c.id === activeId;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => {
-                  sfx.click();
-                  setActiveId(c.id);
-                }}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  background: selected ? 'rgba(255,255,255,0.06)' : 'none',
-                  border: 'none',
-                  borderBottom: '1px solid var(--border, rgba(255,255,255,0.06))',
-                  padding: '0.75rem 1rem',
-                  cursor: 'pointer',
-                  color: 'inherit',
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>{name}</div>
-                <div
-                  className="muted"
-                  style={{
-                    fontSize: '0.8rem',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {c.lastMessage || 'Say hello 👋'}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+      <CreateOffer />
 
-        {/* Thread */}
-        <div className="veyra-thread">
-          {!activeId && (
-            <div style={{ padding: '2rem', textAlign: 'center' }} className="muted">
-              <EmptyState
-                icon="✉️"
-                title="Choose a conversation"
-                body="Your private whispers with friends appear here."
-              />
+      {trades === null && !error && <LoadingBlock label="Reading the trade winds" />}
+
+      {trades !== null && (
+        <>
+          <h2 className="serif">Incoming Offers ({incoming.length})</h2>
+          {incoming.length === 0 ? (
+            <EmptyState icon="inbox" title="No incoming offers" body="When someone offers you a trade, it will appear here." />
+          ) : (
+            <div className="row-list">
+              {incoming.map((t) => (
+                <TradeCard
+                  key={t.id}
+                  trade={t}
+                  incoming
+                  busy={busyId === t.id}
+                  onAccept={() => accept(t)}
+                  onDecline={() => decline(t)}
+                  onComplete={() => complete(t)}
+                />
+              ))}
             </div>
           )}
-          {activeId && (
-            <>
-              <div className="veyra-thread-head">
-                <button
-                  type="button"
-                  className="veyra-back"
-                  onClick={() => {
-                    sfx.click();
-                    setActiveId(null);
-                  }}
-                  aria-label="Back to conversations"
-                >
-                  ←
-                </button>
-                <div className="veyra-avatar" aria-hidden="true">
-                  {(partnerName || 'T').charAt(0).toUpperCase()}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div className="veyra-partner-name">{partnerName}</div>
-                  <div className="veyra-partner-sub">Private whisper</div>
-                </div>
-              </div>
-              <div className="veyra-messages">
-                {!messages && <LoadingBlock label="Reading whispers" />}
-                {messages && messages.length === 0 && (
-                  <p className="muted">No messages yet — say hello.</p>
-                )}
-                {messages && messages.length > 0 && hasMore && (
-                  <div style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        sfx.click();
-                        loadOlder();
-                      }}
-                      disabled={loadingMore}
-                    >
-                      {loadingMore ? 'Loading…' : '↑ Load older messages'}
-                    </button>
-                  </div>
-                )}
-                {(messages || []).map((m) => {
-                  const mine = m.senderUid === user.uid;
-                  return (
-                    <div
-                      key={m.id}
-                      style={{
-                        display: 'flex',
-                        justifyContent: mine ? 'flex-end' : 'flex-start',
-                        marginBottom: '0.5rem',
-                      }}
-                    >
-                      <div
-                        style={{
-                          maxWidth: '75%',
-                          padding: '0.5rem 0.75rem',
-                          borderRadius: '12px',
-                          background: mine
-                            ? 'var(--accent, #6d5bd0)'
-                            : 'rgba(255,255,255,0.07)',
-                          overflowWrap: 'anywhere',
-                        }}
-                      >
-                        <div>{m.text}</div>
-                        <div
-                          style={{
-                            fontSize: '0.7rem',
-                            opacity: 0.65,
-                            marginTop: '0.2rem',
-                            textAlign: 'right',
-                          }}
-                        >
-                          {fmtTime(m.createdAt)}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div ref={bottomRef} />
-              </div>
-              <form
-                onSubmit={send}
-                style={{
-                  display: 'flex',
-                  gap: '0.5rem',
-                  padding: '0.75rem 1rem',
-                  borderTop: '1px solid var(--border, rgba(255,255,255,0.08))',
-                }}
-              >
-                <input
-                  className="input"
-                  style={{ flex: 1 }}
-                  placeholder={`Whisper to ${partnerName}…`}
-                  value={text}
-                  maxLength={VEYRA_MESSAGE_MAX}
-                  onChange={(e) => setText(e.target.value)}
-                  disabled={sending}
-                  aria-label="Private message"
+
+          <h2 className="serif" style={{ marginTop: '2rem' }}>
+            Outgoing Offers ({outgoing.length})
+          </h2>
+          {outgoing.length === 0 ? (
+            <EmptyState icon="send" title="No outgoing offers" body="Propose a trade above to get started." />
+          ) : (
+            <div className="row-list">
+              {outgoing.map((t) => (
+                <TradeCard
+                  key={t.id}
+                  trade={t}
+                  busy={busyId === t.id}
+                  onCancel={() => cancel(t)}
+                  onComplete={() => complete(t)}
                 />
-                <button
-                  className="btn btn-primary"
-                  type="submit"
-                  disabled={sending || !text.trim()}
-                >
-                  {sending ? 'Sending…' : 'Send'}
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function TradeCard({ trade, incoming, busy, onAccept, onDecline, onCancel, onComplete }) {
+  const offerDef = itemById(trade.offerItemId);
+  const wantDef = itemById(trade.wantItemId);
+  const statusLabel = {
+    offered: 'Awaiting response',
+    accepted: 'Accepted — ready to complete',
+    completed: 'Completed',
+    canceled: 'Canceled',
+  }[trade.status];
+
+  return (
+    <div className="row-item">
+      <div className="grow">
+        <p className="title">
+          <ItemName def={offerDef} id={trade.offerItemId} qty={trade.offerQty} />{' '}
+          <span aria-hidden="true">⇄</span>{' '}
+          <ItemName def={wantDef} id={trade.wantItemId} qty={trade.wantQty} />
+        </p>
+        <p className="sub">
+          {incoming ? `From ${shortUid(trade.offeredBy)}` : `To ${shortUid(trade.offeredTo)}`} ·{' '}
+          {statusLabel}
+        </p>
+      </div>
+      {trade.status === 'offered' && incoming && (
+        <>
+          <button className="btn btn-primary btn-sm" disabled={busy} onClick={onAccept}>
+            Accept
+          </button>
+          <button className="btn btn-danger btn-sm" disabled={busy} onClick={onDecline}>
+            Decline
+          </button>
+        </>
+      )}
+      {trade.status === 'offered' && !incoming && (
+        <button className="btn btn-danger btn-sm" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+      )}
+      {trade.status === 'accepted' && (
+        <button className="btn btn-primary btn-sm" disabled={busy} onClick={onComplete}>
+          {busy ? 'Completing…' : 'Complete Trade'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ItemName({ def, id, qty }) {
+  return (
+    <span style={{ '--rarity': rarityColor(def?.rarity) }}>
+      {qty > 1 ? `${qty}× ` : ''}
+      {def ? def.name : id} {def && <RarityTag rarity={def.rarity} />}
+    </span>
+  );
+}
+
+function shortUid(uid) {
+  return uid ? `${String(uid).slice(0, 8)}…` : 'unknown';
+}
+
+function CreateOffer() {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [inv, setInv] = useState([]);
+  const [offerItemId, setOfferItemId] = useState('');
+  const [offerQty, setOfferQty] = useState('1');
+  const [wantItemId, setWantItemId] = useState('');
+  const [wantQty, setWantQty] = useState('1');
+  const [offeredTo, setOfferedTo] = useState('');
+  const [recipient, setRecipient] = useState(null); // { uid, displayName, playerCode }
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open || !user) return undefined;
+    const fb = getFirebase();
+    if (!fb) return undefined;
+    const unsub = onSnapshot(collection(fb.db, 'inventories', user.uid, 'items'), (snap) => {
+      const rows = [];
+      snap.forEach((d) => rows.push({ itemId: d.id, ...d.data() }));
+      const tradable = rows.filter((r) => {
+        const def = itemById(r.itemId);
+        return def && def.tradable && r.quantity > 0;
+      });
+      setInv(tradable);
+      if (tradable.length && !offerItemId) setOfferItemId(tradable[0].itemId);
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, user]);
+
+  const lookupRecipient = async () => {
+    const code = offeredTo.trim().toUpperCase();
+    if (!code) {
+      setError('Enter the recipient’s traveler code.');
+      return;
+    }
+    setLookupBusy(true);
+    setError('');
+    setRecipient(null);
+    try {
+      const res = await api.playerByCode(code);
+      if (res.uid === user.uid) {
+        throw new Error('You cannot trade with yourself.');
+      }
+      setRecipient(res);
+      sfx.click();
+    } catch (err) {
+      sfx.error();
+      setError(err.code === 'not_found' ? 'No traveler found with that code.' : (err.message || 'Lookup failed.'));
+    } finally {
+      setLookupBusy(false);
+    }
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      if (!recipient) throw new Error('Look up the recipient’s traveler code first.');
+      const to = recipient.uid;
+      if (to === user.uid) throw new Error('You cannot trade with yourself.');
+      const fb = getFirebase();
+      await addDoc(collection(fb.db, 'trades'), {
+        offeredBy: user.uid,
+        offeredTo: to,
+        offerItemId,
+        offerQty: parseInt(offerQty, 10),
+        wantItemId,
+        wantQty: parseInt(wantQty, 10),
+        status: 'offered',
+        createdAt: serverTimestamp(),
+      });
+      sfx.click();
+      setOpen(false);
+      setOfferedTo('');
+      setRecipient(null);
+    } catch (err) {
+      sfx.error();
+      setError(err.message || 'Could not create the offer.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: '1.5rem' }}>
+      {!open ? (
+        <button className="btn btn-primary" onClick={() => { sfx.click(); setOpen(true); }}>
+          + Propose Trade
+        </button>
+      ) : (
+        <form onSubmit={submit}>
+          <h3 className="serif" style={{ marginTop: 0 }}>
+            Propose a trade
+          </h3>
+          {inv.length === 0 ? (
+            <p style={{ color: 'var(--ink-dim)' }}>You own nothing tradable right now.</p>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="tr-to">Recipient traveler code</label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    id="tr-to"
+                    className="input"
+                    value={offeredTo}
+                    onChange={(e) => { setOfferedTo(e.target.value); setRecipient(null); }}
+                    placeholder="e.g. X8BL09"
+                    maxLength={6}
+                    style={{ textTransform: 'uppercase', fontFamily: 'monospace', letterSpacing: '0.1em' }}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={lookupRecipient}
+                    disabled={lookupBusy}
+                  >
+                    {lookupBusy ? '…' : 'Find'}
+                  </button>
+                </div>
+                {recipient && (
+                  <p style={{ color: 'var(--gold-soft)', marginTop: '0.5rem' }}>
+                    <Icon name="check" /> {recipient.displayName} (Level {recipient.level})
+                  </p>
+                )}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="field">
+                  <label htmlFor="tr-offer">You offer</label>
+                  <select id="tr-offer" className="input" value={offerItemId}
+                    onChange={(e) => setOfferItemId(e.target.value)}>
+                    {inv.map((r) => (
+                      <option key={r.itemId} value={r.itemId}>
+                        {itemById(r.itemId)?.name} (×{r.quantity})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="tr-offerqty">Qty</label>
+                  <input id="tr-offerqty" className="input" type="number" min="1" value={offerQty}
+                    onChange={(e) => setOfferQty(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label htmlFor="tr-want">You want</label>
+                  <select id="tr-want" className="input" value={wantItemId}
+                    onChange={(e) => setWantItemId(e.target.value)}>
+                    <option value="">— choose —</option>
+                    <TradeableOptions />
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor="tr-wantqty">Qty</label>
+                  <input id="tr-wantqty" className="input" type="number" min="1" value={wantQty}
+                    onChange={(e) => setWantQty(e.target.value)} />
+                </div>
+              </div>
+              {error && <ErrorNotice message={error} />}
+              <div style={{ display: 'flex', gap: '0.6rem' }}>
+                <button className="btn btn-primary" type="submit" disabled={busy || !wantItemId}>
+                  {busy ? 'Sending…' : 'Send Offer'}
                 </button>
-              </form>
+                <button type="button" className="btn btn-ghost" onClick={() => setOpen(false)}>
+                  Cancel
+                </button>
+              </div>
             </>
           )}
-        </div>
-      </div>
+        </form>
+      )}
     </div>
+  );
+}
+
+function TradeableOptions() {
+  // Data-driven: every tradable, active content item is a possible "want".
+  return (
+    <>
+      {content.items
+        .filter((i) => i.active !== false && i.tradable)
+        .map((i) => (
+          <option key={i.id} value={i.id}>
+            {i.name} ({i.rarity})
+          </option>
+        ))}
+    </>
   );
 }
