@@ -70,6 +70,35 @@ test('rollHunt: ranges and scripted outcomes', () => {
   }
 });
 
+test('rollHunt: minLevel gates the drop pool by player level', () => {
+  // Stub: ember-fox needs level 3, starfall-hammer needs 25.
+  // Level 1 player: 500 rolls, never see gated items.
+  for (let i = 0; i < 500; i++) {
+    const roll = rollHunt(Math.random, content, 1);
+    assert.ok(roll.dropItemId !== 'ember-fox', 'level 1 must not drop ember-fox');
+    assert.ok(roll.dropItemId !== 'starfall-hammer', 'level 1 must not drop starfall-hammer');
+  }
+  // Level 3 player: ember-fox becomes possible (force drops with scripted rng).
+  let sawFox = false;
+  for (let i = 0; i < 500; i++) {
+    const roll = rollHunt(Math.random, content, 3);
+    if (roll.dropItemId === 'ember-fox') {
+      sawFox = true;
+      break;
+    }
+  }
+  assert.ok(sawFox, 'level 3 player should eventually drop ember-fox');
+  // Level 25: everything unlocked.
+  const fullPool = content.items.filter((x) => x.active && (x.dropWeight || 0) > 0);
+  const gatedPool = content.items.filter(
+    (x) => x.active && (x.dropWeight || 0) > 0 && (x.minLevel || 1) <= 25
+  );
+  assert.equal(gatedPool.length, fullPool.length);
+  // Omitted level defaults to no gating (backwards compatible).
+  const r = rollHunt(seqRng([0.999, 0.9, 0.1, 0.0]), content);
+  assert.ok(r.dropItemId !== null);
+});
+
 test('applyXp: no level, single level, multi level, max-level cap', () => {
   const curve = content.xpCurve;
 
@@ -122,15 +151,19 @@ test('validatePurchase', () => {
 });
 
 test('validateUpgrade', () => {
-  const blade = contentApi.getItem('thornblade'); // upgradeable, maxLevel 3, costs [40,120]
+  const blade = contentApi.getItem('thornblade'); // upgradeable, maxLevel 3, costs [40,120], needs test-shard
   const fox = contentApi.getItem('ember-fox'); // not upgradeable
-  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 0 }, petals: 40 }), null);
+  const mats = { 'test-shard': 10 };
+  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 0 }, petals: 40, materials: mats }), null);
   assert.equal(validateUpgrade({ item: null, inv: { quantity: 1 }, petals: 99 }), 'not_upgradeable');
   assert.equal(validateUpgrade({ item: fox, inv: { quantity: 1, upgradeLevel: 0 }, petals: 99 }), 'not_upgradeable');
   assert.equal(validateUpgrade({ item: blade, inv: null, petals: 99 }), 'not_owned');
   assert.equal(validateUpgrade({ item: blade, inv: { quantity: 0, upgradeLevel: 0 }, petals: 99 }), 'not_owned');
-  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 2 }, petals: 9999 }), 'max_level');
-  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 0 }, petals: 39 }), 'insufficient_petals');
+  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 2 }, petals: 9999, materials: mats }), 'max_level');
+  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 0 }, petals: 39, materials: mats }), 'insufficient_petals');
+  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 0 }, petals: 40, materials: { 'test-shard': 1 } }), 'insufficient_materials');
+  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 0 }, petals: 40, materials: {} }), 'insufficient_materials');
+  assert.equal(validateUpgrade({ item: blade, inv: { quantity: 1, upgradeLevel: 0 }, petals: 40 }), 'insufficient_materials');
 });
 
 test('validateTradeComplete', () => {

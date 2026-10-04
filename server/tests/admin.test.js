@@ -270,6 +270,10 @@ test('upgrade and trade completion write activity logs', async () => {
     const uid = 'logupgrader';
     await seedPlayer(uid, 500);
     await seedInv(uid, upItem.id, 1, 0);
+    // Seed any upgrade materials the item requires.
+    for (const m of (upItem.upgradeMaterials || [])[0] || []) {
+      await seedInv(uid, m.id, m.qty, 0);
+    }
 
     const up = await post(base, '/api/upgrade', uid, {
       itemId: upItem.id,
@@ -282,6 +286,7 @@ test('upgrade and trade completion write activity logs', async () => {
       itemId: upItem.id,
       newLevel: 1,
       cost: upItem.upgradeCosts[0],
+      materials: (upItem.upgradeMaterials || [])[0] || [],
     });
 
     const sellItem = contentApi.content.items.find((i) => i.sellable).id;
