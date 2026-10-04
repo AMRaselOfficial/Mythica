@@ -3,8 +3,9 @@
  * POST /api/upgrade {itemId, idempotencyKey}
  *
  * Validates the item is upgradeable, owned, below max level, and the player
- * can afford upgradeCosts[upgradeLevel]. Atomically deducts petals and bumps
- * upgradeLevel. Idempotent via `idempotency/{key}`.
+ * can afford upgradeCosts[upgradeLevel] plus the required upgradeMaterials.
+ * Atomically deducts petals + materials and bumps upgradeLevel.
+ * Idempotent via `idempotency/{key}`.
  */
 const express = require('express');
 const { db } = require('../lib/db');
@@ -35,19 +36,38 @@ router.post('/upgrade', async (req, res) => {
       const pSnap = await tx.get(playerRef);
       const petals = pSnap.exists ? pSnap.data().petals ?? 0 : 0;
 
-      const err = validateUpgrade({ item, inv, petals });
+      // Hoist material reads ahead of any writes (Firestore transaction rule).
+      const level = inv ? inv.upgradeLevel || 0 : 0;
+      const needMats = (item && item.upgradeMaterials && item.upgradeMaterials[level]) || [];
+      const matSnaps = [];
+      for (const m of needMats) {
+        const mRef = db.collection('inventories').doc(uid).collection('items').doc(m.id);
+        matSnaps.push({ id: m.id, qty: m.qty || 0, snap: await tx.get(mRef) });
+      }
+      const materials = {};
+      for (const { id, snap } of matSnaps) {
+        materials[id] = snap.exists ? snap.data().quantity || 0 : 0;
+      }
+
+      const err = validateUpgrade({ item, inv, petals, materials });
       if (err) return { error: err };
 
-      const level = inv.upgradeLevel || 0;
       const cost = item.upgradeCosts[level];
       const now = Date.now();
       tx.update(playerRef, { petals: petals - cost, updatedAt: now });
       tx.update(invRef, { upgradeLevel: level + 1 });
+      // Deduct upgrade materials.
+      for (const { id, qty, snap } of matSnaps) {
+        const mRef = db.collection('inventories').doc(uid).collection('items').doc(id);
+        const remaining = (snap.exists ? snap.data().quantity || 0 : 0) - qty;
+        if (remaining <= 0) tx.delete(mRef);
+        else tx.update(mRef, { quantity: remaining });
+      }
 
       const [logRef, logDoc] = activityEntry(db, {
         uid,
         type: 'upgrade',
-        details: { itemId, newLevel: level + 1, cost },
+        details: { itemId, newLevel: level + 1, cost, materials: needMats },
       });
       tx.set(logRef, logDoc);
 

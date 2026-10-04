@@ -56,7 +56,7 @@ router.post('/hunt', async (req, res) => {
         return { error: 'cooldown', retryAfterMs: cd - elapsed };
       }
 
-      const roll = rollHunt(Math.random, contentApi.content);
+      const roll = rollHunt(Math.random, contentApi.content, player.level || 1);
       const applied = applyXp(player, roll.xpGained, contentApi.content.xpCurve);
       const petals = (player.petals ?? 0) + roll.petalsFound;
 
