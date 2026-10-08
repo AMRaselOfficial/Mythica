@@ -160,34 +160,36 @@ function ProfileInner() {
 
       <h2 className="serif">Achievements</h2>
       {!achievements && <LoadingBlock label="Polishing medals" />}
-      {achievements && achievements.length === 0 && (
+      {achievements && achievements.length === 0 && (content.achievements || []).length === 0 && (
         <EmptyState
           icon="medal"
           title="No achievements yet"
           body="Complete hunts and grow your collection to earn your first medal."
         />
       )}
-      {achievements && achievements.length > 0 && (
+      {(content.achievements || []).length > 0 && (
         <div className="row-list">
-          {achievements.map((a) => {
-            const def = (content.achievements || []).find((x) => x.id === a.id);
+          {(content.achievements || []).map((def) => {
+            const a = (achievements || []).find((x) => x.id === def.id);
+            const completed = !!a?.completed;
+            const isHidden = def.hidden && !completed;
             return (
-              <div className="row-item" key={a.id}>
+              <div className="row-item" key={def.id}>
                 <span style={{ color: 'var(--gold-soft, #d8b36a)' }} aria-hidden="true">
-                  <Icon name={a.completed ? 'medal' : 'lock'} size="1.8rem" />
+                  <Icon name={completed ? 'medal' : isHidden ? 'lock' : 'medal'} size="1.8rem" />
                 </span>
                 <div className="grow">
-                  <p className="title">{def?.name || a.id}</p>
-                  <p className="sub">{def?.description || ''}</p>
+                  <p className="title">{isHidden ? '???' : def.name}</p>
+                  <p className="sub">{isHidden ? 'A secret achievement. Keep exploring…' : def.description}</p>
                 </div>
-                {a.completed ? (
+                {completed ? (
                   <span className="rarity-tag" style={{ '--rarity': 'var(--success)' }}>
-                    Earned
+                    +{def.xp || 0} XP
                   </span>
+                ) : !isHidden ? (
+                  <span className="qty-badge">+{def.xp || 0} XP</span>
                 ) : (
-                  <span className="qty-badge">
-                    {a.progress ?? 0}/{def?.criteria?.target ?? '?'}
-                  </span>
+                  <span className="qty-badge">???</span>
                 )}
               </div>
             );
