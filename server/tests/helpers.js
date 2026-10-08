@@ -6,8 +6,6 @@
  */
 process.env.USE_FAKE_DB = '1';
 process.env.FAKE_AUTH = '1';
-process.env.THEATER_MIN_MS = '0';
-process.env.THEATER_MAX_MS = '0';
 
 const { db, resetFakeDb } = require('../lib/db');
 const contentApi = require('../lib/content');
