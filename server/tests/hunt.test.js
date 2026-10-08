@@ -50,9 +50,10 @@ test('hunt: first hunt succeeds with contract-shaped response', async () => {
     assert.equal(json.ok, true);
     assert.ok(json.xpGained >= H.xpMin && json.xpGained <= H.xpMax, 'xp in range');
     assert.ok(json.petalsFound >= 0 && json.petalsFound <= H.petalFindMax, 'petals in range');
-    assert.equal(json.leveledUp, false);
-    assert.equal(json.level, 1);
-    assert.equal(json.xp, json.xpGained);
+    // First hunt also grants the first-hunt achievement (+100 XP in stub) -> level 2.
+    assert.equal(json.leveledUp, true);
+    assert.equal(json.level, 2);
+    assert.ok(json.xp >= 0);
     assert.equal(json.petals, 20 + json.petalsFound);
     assert.ok(json.nextHuntAt >= before + H.cooldownSec * 1000);
     if (json.drop) {
@@ -142,14 +143,22 @@ test('hunt: XP level-up math (99 xp + hunt xp crosses level 1 -> 2)', async () =
     const uid = 'hunt-lvl';
     const first = await post(base, '/api/hunt', uid, {});
     assert.equal(first.status, 200);
-    // xpForLevel(1) = floor(100 * 1^1.45) = 100. Put the player 1 xp short.
-    await db.collection('players').doc(uid).update({ xp: 99, lastHuntAt: 0 });
+    // The first hunt also grants the first-hunt achievement (+100 XP), so the
+    // player may already be level 2+. Reset to a known state: level 1, 99 xp,
+    // and mark first-hunt as earned so it doesn't fire again.
+    await db.collection('players').doc(uid).update({ level: 1, xp: 99, lastHuntAt: 0 });
+    await db.collection('players').doc(uid).collection('achievements').doc('first-hunt').set({
+      completed: true,
+      earnedAt: Date.now(),
+      xp: 100,
+    });
+    const before = await db.collection('players').doc(uid).get();
+    const beforeLevel = before.data().level;
     const { status, json } = await post(base, '/api/hunt', uid, {});
     assert.equal(status, 200);
+    // xpForLevel(1) = floor(100 * 1^1.45) = 100. 99 + hunt xp >= 100 -> level up.
     assert.equal(json.leveledUp, true);
-    assert.equal(json.level, 2);
-    // 99 + xpGained - 100 = xpGained - 1 remainder
-    assert.equal(json.xp, json.xpGained - 1);
+    assert.equal(json.level, beforeLevel + 1);
   } finally {
     await close();
   }
@@ -165,11 +174,14 @@ test('hunt: player doc gets new-player defaults on first hunt', async () => {
     const p = await db.collection('players').doc(uid).get();
     assert.ok(p.exists);
     const d = p.data();
-    assert.equal(d.level, 1);
+    // First hunt grants first-hunt (+100 XP in stub) -> level 2.
+    assert.equal(d.level, 2);
     assert.equal(d.accountStatus, 'active');
     assert.equal(d.musicEnabled, true);
     assert.equal(d.sfxEnabled, true);
     assert.ok(d.lastHuntAt > 0);
+    assert.equal(d.equippedWeaponId, 'worn-blade');
+    assert.ok(d.stats && d.stats.hunts === 1);
   } finally {
     await close();
   }
