@@ -218,6 +218,30 @@ function SupportInner() {
         My requests
       </h2>
       {tickets === null && !loadError && <LoadingBlock label="Fetching your requests" />}
+      {tickets && tickets.length === 0 && (
+        <EmptyState
+          icon="help"
+          title="No requests yet"
+          body="When you contact support, your tickets and their replies will appear here."
+        />
+      )}
+      {tickets && tickets.length > 0 && (
+        <div className="row-list">
+          {tickets.map((t) => (
+            <TicketCard
+              key={t.ticketId}
+              ticket={t}
+              open={openId === t.ticketId}
+              onToggle={() => toggleOpen(t)}
+              onReplied={load}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TicketCard({ ticket, open, onToggle, onReplied }) {
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
@@ -338,29 +362,6 @@ function TicketCard({ ticket, open, onToggle, onReplied }) {
               </button>
             </form>
           )}
-        </div>
-      )}
-    </div>
-  );
-                }
-      {tickets && tickets.length === 0 && (
-        <EmptyState
-          icon="help"
-          title="No requests yet"
-          body="When you contact support, your tickets and their replies will appear here."
-        />
-      )}
-      {tickets && tickets.length > 0 && (
-        <div className="row-list">
-          {tickets.map((t) => (
-            <TicketCard
-              key={t.ticketId}
-              ticket={t}
-              open={openId === t.ticketId}
-              onToggle={() => toggleOpen(t)}
-              onReplied={load}
-            />
-          ))}
         </div>
       )}
     </div>
