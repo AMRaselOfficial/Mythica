@@ -133,6 +133,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- Support tickets: server-managed via the game API. Players create
+    // tickets and reply through POST /api/support*; admins manage them via
+    // /api/admin/support*. No direct client access.
+    match /supportTickets/{ticketId} {
+      allow read, write: if false;
+    }
+
     // ---- Social: public traveler profiles (base info only, server-maintained)
     match /publicProfiles/{uid} {
       allow read: if signedIn();
