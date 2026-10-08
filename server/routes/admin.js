@@ -13,6 +13,12 @@
  * POST /api/admin/users/:uid/unban
  * POST /api/admin/users/:uid/inventory/add    { itemId, quantity }
  * POST /api/admin/users/:uid/inventory/remove { itemId, quantity }
+ * GET  /api/admin/support[?status=&limit=]
+ * GET  /api/admin/support/unread-count
+ * GET  /api/admin/support/:ticketId
+ * POST /api/admin/support/:ticketId/reply   { text }
+ * POST /api/admin/support/:ticketId/status  { status: pending|checking|solved }
+ * POST /api/admin/support/:ticketId/read
  */
 const express = require('express');
 const { db, USE_FAKE, loadAdmin } = require('../lib/db');
@@ -637,6 +643,159 @@ router.get('/admin/events/:id/joins', async (req, res) => {
     });
   } catch (e) {
     console.error('GET /api/admin/events/:id/joins failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * Support tickets.
+ *
+ * GET  /api/admin/support                  list tickets (?status=pending|checking|solved, ?limit=)
+ * GET  /api/admin/support/unread-count     count of tickets with unreadByAdmin
+ * GET  /api/admin/support/:ticketId        full ticket with message thread
+ * POST /api/admin/support/:ticketId/reply  admin reply {text}
+ * POST /api/admin/support/:ticketId/status admin sets status {status}
+ * POST /api/admin/support/:ticketId/read   mark ticket as read by admin
+ *
+ * Error codes: not_found, bad_text, bad_status
+ * ------------------------------------------------------------------ */
+
+const SUPPORT_STATUSES = ['pending', 'checking', 'solved'];
+
+function publicSupportTicket(id, d) {
+  return {
+    ticketId: id,
+    uid: d.uid || '',
+    displayName: d.displayName || '',
+    email: d.email || '',
+    title: d.title || '',
+    description: d.description || '',
+    status: d.status || 'pending',
+    unreadByAdmin: !!d.unreadByAdmin,
+    messageCount: (d.messages || []).length,
+    createdAt: toMillis(d.createdAt),
+    updatedAt: toMillis(d.updatedAt),
+    messages: (d.messages || []).map((m) => ({
+      sender: m.sender,
+      text: m.text,
+      createdAt: toMillis(m.createdAt),
+    })),
+  };
+}
+
+async function getSupportTicket(ticketId) {
+  const snap = await db.collection('supportTickets').doc(ticketId).get();
+  if (!snap.exists) return null;
+  return { ref: snap.ref, id: snap.id, data: snap.data() };
+}
+
+/** List tickets, newest first, optional status filter. */
+router.get('/admin/support', async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    let rows = await listDocs('supportTickets');
+    if (status && SUPPORT_STATUSES.includes(status)) {
+      rows = rows.filter((r) => (r.data.status || 'pending') === status);
+    }
+    rows.sort((a, b) => (b.data.updatedAt || 0) - (a.data.updatedAt || 0));
+    const tickets = rows.slice(0, limit).map((r) => publicSupportTicket(r.id, r.data));
+    const unread = rows.filter((r) => r.data.unreadByAdmin).length;
+    res.json({ ok: true, tickets, unreadCount: unread });
+  } catch (e) {
+    console.error('GET /api/admin/support failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Count tickets with unread admin messages. */
+router.get('/admin/support/unread-count', async (req, res) => {
+  try {
+    const rows = await listDocs('supportTickets');
+    res.json({ ok: true, unreadCount: rows.filter((r) => r.data.unreadByAdmin).length });
+  } catch (e) {
+    console.error('GET /api/admin/support/unread-count failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Full ticket detail. */
+router.get('/admin/support/:ticketId', async (req, res) => {
+  try {
+    const t = await getSupportTicket(req.params.ticketId);
+    if (!t) return res.status(404).json({ ok: false, error: 'not_found' });
+    res.json({ ok: true, ticket: publicSupportTicket(t.id, t.data) });
+  } catch (e) {
+    console.error('GET /api/admin/support/:ticketId failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Admin replies to a ticket. */
+router.post('/admin/support/:ticketId/reply', async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (!text || text.length > 2000) {
+      return res.status(400).json({ ok: false, error: 'bad_text' });
+    }
+    const t = await getSupportTicket(req.params.ticketId);
+    if (!t) return res.status(404).json({ ok: false, error: 'not_found' });
+    const now = Date.now();
+    const messages = [...(t.data.messages || []), { sender: 'admin', text, createdAt: now }];
+    await t.ref.update({ messages, unreadByUser: true, unreadByAdmin: false, updatedAt: now });
+    try {
+      await logActivity(db, {
+        uid: t.data.uid,
+        type: 'support_reply',
+        details: { ticketId: t.id, by: req.uid },
+      });
+    } catch (e) {
+      console.error('support reply activity log failed:', e && e.message);
+    }
+    const snap = await t.ref.get();
+    res.json({ ok: true, ticket: publicSupportTicket(t.id, snap.data()) });
+  } catch (e) {
+    console.error('POST /api/admin/support/:ticketId/reply failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Admin sets a ticket's status. */
+router.post('/admin/support/:ticketId/status', async (req, res) => {
+  try {
+    const status = String(req.body?.status || '').trim();
+    if (!SUPPORT_STATUSES.includes(status)) {
+      return res.status(400).json({ ok: false, error: 'bad_status' });
+    }
+    const t = await getSupportTicket(req.params.ticketId);
+    if (!t) return res.status(404).json({ ok: false, error: 'not_found' });
+    await t.ref.update({ status, updatedAt: Date.now() });
+    try {
+      await logActivity(db, {
+        uid: t.data.uid,
+        type: 'support_status',
+        details: { ticketId: t.id, status, by: req.uid },
+      });
+    } catch (e) {
+      console.error('support status activity log failed:', e && e.message);
+    }
+    const snap = await t.ref.get();
+    res.json({ ok: true, ticket: publicSupportTicket(t.id, snap.data()) });
+  } catch (e) {
+    console.error('POST /api/admin/support/:ticketId/status failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Mark a ticket as read by the admin (clears the "new" flag). */
+router.post('/admin/support/:ticketId/read', async (req, res) => {
+  try {
+    const t = await getSupportTicket(req.params.ticketId);
+    if (!t) return res.status(404).json({ ok: false, error: 'not_found' });
+    await t.ref.update({ unreadByAdmin: false });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/admin/support/:ticketId/read failed:', e);
     res.status(500).json({ ok: false, error: 'internal' });
   }
 });
