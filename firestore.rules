@@ -5,6 +5,35 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
 
+    // New accounts may only use a verified mail provider (Gmail, Outlook,
+    // Yahoo, Proton Mail, …). Keep in sync with server/lib/emailProviders.js
+    // and web/lib/emailProviders.js.
+    function allowedEmailDomain() {
+      let email = request.auth.token.email.lower();
+      let parts = email.split('@');
+      let domain = parts[parts.size() - 1];
+      return domain in [
+        'gmail.com', 'googlemail.com',
+        'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+        'outlook.co.uk', 'hotmail.co.uk', 'live.co.uk',
+        'outlook.de', 'hotmail.de', 'outlook.fr', 'hotmail.fr',
+        'outlook.es', 'hotmail.es', 'outlook.it', 'hotmail.it',
+        'outlook.com.br', 'hotmail.com.br',
+        'yahoo.com', 'yahoo.co.uk', 'yahoo.co.in', 'yahoo.in', 'yahoo.ca',
+        'yahoo.com.au', 'yahoo.fr', 'yahoo.de', 'yahoo.es', 'yahoo.it',
+        'yahoo.co.jp', 'ymail.com', 'rocketmail.com',
+        'proton.me', 'protonmail.com', 'protonmail.ch', 'pm.me',
+        'icloud.com', 'me.com', 'mac.com',
+        'aol.com',
+        'gmx.com', 'gmx.net', 'gmx.de', 'gmx.at', 'gmx.ch',
+        'zoho.com', 'zohomail.com',
+        'yandex.com', 'yandex.ru', 'ya.ru',
+        'mail.ru', 'inbox.ru', 'list.ru', 'bk.ru',
+        'tutanota.com', 'tutanota.de', 'tutamail.com', 'keemail.me',
+        'fastmail.com', 'fastmail.fm'
+      ];
+    }
+
     // ---- Catalog: authenticated read, no client writes (developer/server only)
     match /items/{itemId} {
       allow read: if signedIn();
@@ -37,6 +66,7 @@ service cloud.firestore {
     match /players/{uid} {
       allow read: if isOwner(uid);
       allow create: if isOwner(uid)
+        && allowedEmailDomain()
         && request.resource.data.keys().hasOnly([
              'displayName','email','petals','level','xp','createdAt','updatedAt',
              'lastHuntAt','musicEnabled','sfxEnabled','accountStatus'
