@@ -8,10 +8,11 @@
  * Idempotent via `idempotency/{key}`.
  */
 const express = require('express');
-const { db } = require('../lib/db');
+const { db, USE_FAKE } = require('../lib/db');
 const { activityEntry } = require('../lib/activity');
 const contentApi = require('../lib/content');
-const { validateUpgrade } = require('../lib/game');
+const { validateUpgrade, applyXp } = require('../lib/game');
+const { checkAndGrant } = require('../lib/achievementsTx');
 
 const router = express.Router();
 
@@ -25,7 +26,7 @@ router.post('/upgrade', async (req, res) => {
     const out = await db.runTransaction(async (tx) => {
       const idemRef = db.collection('idempotency').doc(idempotencyKey);
       const idemSnap = await tx.get(idemRef);
-      if (idemSnap.exists) return { result: idemSnap.data().result };
+      if (idemSnap.exists) return { result: idemSnap.data().result, replay: true };
 
       const item = contentApi.getItem(itemId);
       const invRef = db.collection('inventories').doc(uid).collection('items').doc(itemId);
@@ -73,10 +74,16 @@ router.post('/upgrade', async (req, res) => {
 
       const result = { ok: true, itemId, newLevel: level + 1 };
       tx.set(idemRef, { key: idempotencyKey, result, createdAt: now });
-      return { result };
+      return { result, replay: false };
     });
 
     if (out.error) return res.status(400).json({ ok: false, error: out.error });
+    // Best-effort: upgrade-count achievements. Never blocks. Skipped on replays.
+    if (!out.replay) {
+      checkAndGrant(db, USE_FAKE, contentApi.content, (id) => contentApi.getItem(id), applyXp, uid, {
+        upgrades: 1,
+      }).catch(() => {});
+    }
     return res.json(out.result);
   } catch (e) {
     console.error('POST /api/upgrade failed:', e);
