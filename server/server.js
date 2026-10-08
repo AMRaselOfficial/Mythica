@@ -49,6 +49,7 @@ app.use(
   require('./routes/players'),
   require('./routes/redeem'),
   require('./routes/events'),
+  require('./routes/support'),
   require('./routes/admin')
 );
 
