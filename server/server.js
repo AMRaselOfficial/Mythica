@@ -46,6 +46,7 @@ app.use(
   require('./routes/market'),
   require('./routes/trades'),
   require('./routes/upgrade'),
+  require('./routes/inventory'),
   require('./routes/players'),
   require('./routes/redeem'),
   require('./routes/events'),
