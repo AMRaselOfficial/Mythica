@@ -11,6 +11,7 @@ const contentApi = require('../lib/content');
 const { rollHunt, applyXp } = require('../lib/game');
 const { generateUniqueCode, ensurePlayerCode } = require('../lib/playerCode');
 const { bumpHuntEventProgress } = require('../lib/events');
+const { newPlayerEmailError } = require('../lib/emailProviders');
 
 const router = express.Router();
 
@@ -48,6 +49,12 @@ router.post('/hunt', async (req, res) => {
       const playerRef = db.collection('players').doc(uid);
       const snap = await tx.get(playerRef);
       const isNew = !snap.exists;
+      // Backup gate: new accounts must use a verified mail provider.
+      // (Primary enforcement is the Firestore players/{uid} create rule.)
+      const emailErr = newPlayerEmailError(req.email);
+      if (isNew && emailErr) {
+        return { error: emailErr };
+      }
       const player = isNew ? await newPlayer(now, uid) : snap.data();
 
       const cd = contentApi.cooldownMs();
@@ -150,6 +157,9 @@ router.post('/hunt', async (req, res) => {
 
     if (out.error === 'cooldown') {
       return res.status(429).json({ ok: false, error: 'cooldown', retryAfterMs: out.retryAfterMs });
+    }
+    if (out.error === 'email_provider_not_allowed') {
+      return res.status(403).json({ ok: false, error: 'email_provider_not_allowed' });
     }
 
     // Theater delay happens AFTER the transaction commits.
