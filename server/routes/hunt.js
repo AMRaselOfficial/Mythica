@@ -2,18 +2,28 @@
 /**
  * POST /api/hunt
  * Transactional hunt: cooldown check (server time), set lastHuntAt at START,
- * roll, apply, commit — then respond immediately.
+ * resolve equipped weapon power, roll (power-gated), apply, update stats,
+ * evaluate achievements, commit — then respond immediately.
  */
 const express = require('express');
 const { db, USE_FAKE } = require('../lib/db');
 const { activityEntry } = require('../lib/activity');
 const contentApi = require('../lib/content');
-const { rollHunt, applyXp } = require('../lib/game');
-const { generateUniqueCode, ensurePlayerCode } = require('../lib/playerCode');
+const { rollHunt, applyXp, weaponPower, maxUnlockedRarity } = require('../lib/game');
+const { generateUniqueCode } = require('../lib/playerCode');
 const { bumpHuntEventProgress } = require('../lib/events');
 const { newPlayerEmailError } = require('../lib/emailProviders');
+const {
+  readEarned,
+  grantNewlyEarned,
+  countFriends,
+  weaponSummary,
+  listInventory,
+} = require('../lib/achievementsTx');
 
 const router = express.Router();
+
+const STARTER_WEAPON_ID = 'worn-blade';
 
 async function newPlayer(now, uid) {
   return {
@@ -30,7 +40,23 @@ async function newPlayer(now, uid) {
     musicEnabled: true,
     sfxEnabled: true,
     accountStatus: 'active',
+    equippedWeaponId: STARTER_WEAPON_ID,
+    stats: {
+      hunts: 0,
+      trades: 0,
+      upgrades: 0,
+      legendaryLoot: 0,
+      mythicLoot: 0,
+      huntsToday: 0,
+      lastHuntDay: '',
+      nightHunts: 0,
+      comebacks: 0,
+    },
   };
+}
+
+function dayString(now) {
+  return new Date(now).toISOString().slice(0, 10);
 }
 
 router.post('/hunt', async (req, res) => {
@@ -55,53 +81,146 @@ router.post('/hunt', async (req, res) => {
         return { error: 'cooldown', retryAfterMs: cd - elapsed };
       }
 
-      const roll = rollHunt(Math.random, contentApi.content, player.level || 1);
-      const applied = applyXp(player, roll.xpGained, contentApi.content.xpCurve);
-      const petals = (player.petals ?? 0) + roll.petalsFound;
+      // ---- Hoisted reads (before any writes) ----
+      const invRows = await listInventory(tx, db, uid, USE_FAKE);
+      const earned = await readEarned(tx, db, uid, USE_FAKE);
+      // Friend count only matters if friend achievements are still unearned.
+      const needsFriends = (contentApi.content.achievements || []).some(
+        (a) => a.trigger && a.trigger.type === 'friends' && !earned[a.id]
+      );
+      const friendCount = needsFriends ? await countFriends(tx, db, USE_FAKE, uid) : 0;
 
-      // Firestore transactions require ALL reads before ALL writes, so the
-      // inventory read is hoisted here ahead of any write.
-      let drop = null;
+      // Resolve equipped weapon power.
+      const getItem = (id) => contentApi.getItem(id);
+      let equippedId = player.equippedWeaponId || null;
+      let equippedRow = equippedId ? invRows.find((r) => r.id === equippedId) : null;
+      let equippedItem = equippedRow ? getItem(equippedRow.id) : null;
+      let equippedUpgrade = equippedRow ? equippedRow.data.upgradeLevel || 0 : 0;
+      let equippedStars = equippedRow ? equippedRow.data.stars || 0 : 0;
+      // Brand-new players: the starter weapon is granted below; use it now.
+      if (isNew) {
+        equippedId = STARTER_WEAPON_ID;
+        equippedItem = getItem(STARTER_WEAPON_ID);
+        equippedUpgrade = 0;
+        equippedStars = 0;
+      }
+      // Fallback: best owned weapon. Grant the starter if the player has none.
+      if (!equippedItem || equippedItem.type !== 'weapon') {
+        let best = null;
+        let bestPower = -1;
+        for (const r of invRows) {
+          const it = getItem(r.id);
+          if (!it || it.type !== 'weapon') continue;
+          const p = weaponPower(contentApi.content, it, r.data.upgradeLevel || 0, r.data.stars || 0);
+          if (p > bestPower) {
+            bestPower = p;
+            best = { row: r, item: it };
+          }
+        }
+        if (best) {
+          equippedId = best.row.id;
+          equippedRow = best.row;
+          equippedItem = best.item;
+        }
+      }
+      const power = equippedItem
+        ? weaponPower(contentApi.content, equippedItem, equippedUpgrade, equippedStars)
+        : 0;
+
+      const roll = rollHunt(Math.random, contentApi.content, power, player.level || 1);
+
+      // Drop inventory read (hoisted).
       let invRef = null;
       let invSnap = null;
       let item = null;
       if (roll.dropItemId) {
-        item = contentApi.getItem(roll.dropItemId);
-        invRef = db
-          .collection('inventories')
-          .doc(uid)
-          .collection('items')
-          .doc(roll.dropItemId);
+        item = getItem(roll.dropItemId);
+        invRef = db.collection('inventories').doc(uid).collection('items').doc(roll.dropItemId);
         invSnap = await tx.get(invRef);
       }
 
+      // ---- Stats update ----
+      const stats = { ...(player.stats || {}) };
+      const today = dayString(now);
+      const lastDay = stats.lastHuntDay || '';
+      stats.hunts = (stats.hunts || 0) + 1;
+      stats.huntsToday = lastDay === today ? (stats.huntsToday || 0) + 1 : 1;
+      stats.lastHuntDay = today;
+      const hour = new Date(now).getHours();
+      if (hour >= 0 && hour < 4) stats.nightHunts = (stats.nightHunts || 0) + 1;
+      // Comeback: previous hunt was 7+ days ago.
+      const lastHunt = player.lastHuntAt || 0;
+      if (lastHunt > 0 && now - lastHunt > 7 * 24 * 3600 * 1000) {
+        stats.comebacks = (stats.comebacks || 0) + 1;
+      }
+      if (item) {
+        if (item.rarity === 'legendary') stats.legendaryLoot = (stats.legendaryLoot || 0) + 1;
+        if (item.rarity === 'mythic') stats.mythicLoot = (stats.mythicLoot || 0) + 1;
+      }
+
       // ---- Writes only from this point on. ----
+      // XP from the hunt itself.
+      const applied = applyXp({ level: player.level || 1, xp: player.xp || 0 }, roll.xpGained, contentApi.content.xpCurve);
+      const petals = (player.petals ?? 0) + roll.petalsFound;
+
+      // Achievements: evaluate with post-hunt stats, grant XP on top.
+      const weapons = weaponSummary(contentApi.content, invRows, getItem);
+      const { newly, xp: achXp } = grantNewlyEarned(tx, db, {
+        uid,
+        content: contentApi.content,
+        earned,
+        stats,
+        friendCount,
+        weapons,
+        now,
+      });
+      const final = applyXp(
+        { level: applied.level, xp: applied.xp },
+        achXp,
+        contentApi.content.xpCurve
+      );
+      // Preserve a level-up from the hunt XP itself.
+      final.leveledUp = applied.leveledUp || final.leveledUp;
+
       const playerUpdate = {
         lastHuntAt: now,
-        level: applied.level,
-        xp: applied.xp,
+        level: final.level,
+        xp: final.xp,
         petals,
+        stats,
         updatedAt: now,
       };
+      // Persist equipped weapon if we resolved a fallback.
+      if (equippedId && equippedId !== player.equippedWeaponId) {
+        playerUpdate.equippedWeaponId = equippedId;
+      }
       if (isNew) {
         tx.set(playerRef, { ...player, ...playerUpdate });
+        // Grant the starter weapon to brand-new players.
+        tx.set(db.collection('inventories').doc(uid).collection('items').doc(STARTER_WEAPON_ID), {
+          quantity: 1,
+          upgradeLevel: 0,
+          stars: 0,
+          obtainedAt: now,
+          favorite: false,
+        });
       } else {
         tx.update(playerRef, playerUpdate);
       }
 
       // Public traveler profile: base info for Agora, Veyra and friends.
-      // Server-maintained; clients can read but never write (see firestore.rules).
       tx.set(
         db.collection('publicProfiles').doc(uid),
         {
           displayName: player.displayName || 'Traveler',
-          level: applied.level,
+          level: final.level,
           playerCode: player.playerCode || null,
           updatedAt: now,
         },
         { merge: true }
       );
 
+      let drop = null;
       if (roll.dropItemId) {
         let quantity;
         if (invSnap.exists) {
@@ -109,7 +228,7 @@ router.post('/hunt', async (req, res) => {
           tx.update(invRef, { quantity });
         } else {
           quantity = 1;
-          tx.set(invRef, { quantity: 1, upgradeLevel: 0, obtainedAt: now, favorite: false });
+          tx.set(invRef, { quantity: 1, upgradeLevel: 0, stars: 0, obtainedAt: now, favorite: false });
         }
         drop = {
           itemId: item.id,
@@ -129,7 +248,9 @@ router.post('/hunt', async (req, res) => {
           petalsFound: roll.petalsFound,
           dropItemId: roll.dropItemId,
           dropRarity: drop ? drop.rarity : null,
-          leveledUp: applied.leveledUp,
+          leveledUp: final.leveledUp,
+          weaponPower: power,
+          achievements: newly.map((a) => a.id),
         },
       });
       tx.set(logRef, logDoc);
@@ -139,11 +260,15 @@ router.post('/hunt', async (req, res) => {
         xpGained: roll.xpGained,
         petalsFound: roll.petalsFound,
         drop,
-        leveledUp: applied.leveledUp,
-        level: applied.level,
-        xp: applied.xp,
+        leveledUp: final.leveledUp,
+        level: final.level,
+        xp: final.xp,
         petals,
         nextHuntAt: now + cd,
+        weaponPower: power,
+        equippedWeaponId: equippedId,
+        maxRarity: maxUnlockedRarity(contentApi.content, power),
+        achievements: newly.map((a) => ({ id: a.id, name: a.name, xp: a.xp })),
       };
     });
 
