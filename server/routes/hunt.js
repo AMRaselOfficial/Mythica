@@ -104,7 +104,7 @@ router.post('/hunt', async (req, res) => {
         equippedUpgrade = 0;
         equippedStars = 0;
       }
-      // Fallback: best owned weapon. Grant the starter if the player has none.
+      // Fallback: best owned weapon.
       if (!equippedItem || equippedItem.type !== 'weapon') {
         let best = null;
         let bestPower = -1;
@@ -121,7 +121,18 @@ router.post('/hunt', async (req, res) => {
           equippedId = best.row.id;
           equippedRow = best.row;
           equippedItem = best.item;
+          equippedUpgrade = best.row.data.upgradeLevel || 0;
+          equippedStars = best.row.data.stars || 0;
         }
+      }
+      // No weapons at all (pre-weapon-system accounts): grant the starter now.
+      let grantStarter = false;
+      if (!equippedItem || equippedItem.type !== 'weapon') {
+        grantStarter = true;
+        equippedId = STARTER_WEAPON_ID;
+        equippedItem = getItem(STARTER_WEAPON_ID);
+        equippedUpgrade = 0;
+        equippedStars = 0;
       }
       const power = equippedItem
         ? weaponPower(contentApi.content, equippedItem, equippedUpgrade, equippedStars)
@@ -206,6 +217,16 @@ router.post('/hunt', async (req, res) => {
         });
       } else {
         tx.update(playerRef, playerUpdate);
+        // Backfill the starter for pre-weapon-system accounts that own no weapons.
+        if (grantStarter) {
+          tx.set(db.collection('inventories').doc(uid).collection('items').doc(STARTER_WEAPON_ID), {
+            quantity: 1,
+            upgradeLevel: 0,
+            stars: 0,
+            obtainedAt: now,
+            favorite: false,
+          });
+        }
       }
 
       // Public traveler profile: base info for Agora, Veyra and friends.
