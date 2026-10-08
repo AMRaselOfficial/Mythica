@@ -1,5 +1,6 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { rarityColor } from '../../lib/content.js';
 import { asset } from '../../lib/paths.js';
 import { Icon, BigIcon } from './icons.js';
@@ -40,6 +41,14 @@ export function ArtFallback({ type, style }) {
 }
 
 export function Modal({ title, onClose, children }) {
+  // Render the dialog in a portal on document.body so it escapes the
+  // `.page` stacking context (position:relative + z-index:1). Without this,
+  // siblings painted later in DOM order (footer, sticky nav) render above
+  // the dialog even though the backdrop has z-index:100.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onClose();
@@ -48,7 +57,8 @@ export function Modal({ title, onClose, children }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return (
+  if (!mounted) return null;
+  return createPortal(
     <div
       className="modal-backdrop"
       role="dialog"
@@ -69,7 +79,8 @@ export function Modal({ title, onClose, children }) {
         </div>
         <div style={{ marginTop: '1rem' }}>{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
