@@ -169,6 +169,8 @@ export const api = {
   tradesComplete: (tradeId, idempotencyKey) =>
     post('/api/trades/complete', { tradeId, idempotencyKey }),
   upgrade: (itemId, idempotencyKey) => post('/api/upgrade', { itemId, idempotencyKey }),
+  equipWeapon: (itemId) => post('/api/inventory/equip', { itemId }),
+  mergeWeapon: (itemId) => post('/api/inventory/merge', { itemId }),
   playerMe: () => get('/api/player/me'),
   playerByCode: (code) => get(`/api/players/by-code/${encodeURIComponent(code)}`),
   redeem: (code) => post('/api/redeem', { code }),
