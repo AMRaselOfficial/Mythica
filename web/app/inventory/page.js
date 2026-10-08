@@ -4,7 +4,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import Protected from '../components/Protected.js';
 import { Modal, RarityTag, ItemImage, ArtFallback, LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
 import { useAuth } from '../../contexts/AuthContext.js';
-import content, { rarityColor, itemById } from '../../lib/content.js';
+import content, { rarityColor, itemById, weaponPower, formatPower, starDisplay, maxUnlockedRarity } from '../../lib/content.js';
 import { getFirebase } from '../../lib/firebase.js';
 import { asset } from '../../lib/paths.js';
 import { doc, updateDoc } from 'firebase/firestore';
@@ -21,7 +21,7 @@ export default function InventoryPage() {
 }
 
 function InventoryInner() {
-  const { user } = useAuth();
+  const { user, player } = useAuth();
   const [inv, setInv] = useState(null); // null = loading
   const [loadError, setLoadError] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -134,12 +134,23 @@ function InventoryInner() {
               <ArtFallback type={def.type} />
             </div>
             <div className="meta">
-              <p className="name">{def.name}</p>
+              <p className="name">
+                {def.name}
+                {def.type === 'weapon' && (row.stars || 0) > 0 && (
+                  <span style={{ color: 'var(--gold)' }}> {starDisplay(row.stars)}</span>
+                )}
+              </p>
               <RarityTag rarity={def.rarity} />{' '}
               <span className="qty-badge">
                 ×{row.quantity}
                 {row.upgradeLevel > 0 ? ` · Lv ${row.upgradeLevel + 1}` : ''}
+                {def.type === 'weapon' ? ` · ${formatPower(weaponPower(def, row.upgradeLevel || 0, row.stars || 0))} pw` : ''}
               </span>
+              {def.type === 'weapon' && player?.equippedWeaponId === def.id && (
+                <span className="rarity-tag" style={{ '--rarity': 'var(--success)', marginTop: '0.25rem' }}>
+                  Equipped
+                </span>
+              )}
             </div>
           </button>
         ))}
@@ -234,6 +245,45 @@ function ItemDetailModal({ itemId, invRow, inv, onClose }) {
     }
   };
 
+  const isWeapon = def.type === 'weapon';
+  const stars = invRow?.stars || 0;
+  const power = isWeapon ? weaponPower(def, level - 1, stars) : 0;
+  const equipped = player?.equippedWeaponId === itemId;
+  const maxStars = (content.weaponPower || {}).maxStars || 6;
+  const canMerge = isWeapon && owned >= 2 && stars < maxStars;
+
+  const doEquip = async () => {
+    setBusy(true);
+    say('info', '');
+    try {
+      await api.equipWeapon(itemId);
+      sfx.upgrade();
+      say('info', `${def.name} equipped for hunts.`);
+      onClose();
+    } catch (err) {
+      sfx.error();
+      say('error', err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doMerge = async () => {
+    setBusy(true);
+    say('info', '');
+    try {
+      const res = await api.mergeWeapon(itemId);
+      sfx.upgrade();
+      say('info', `Merged! Now ${starDisplay(res.stars)} (${formatPower(res.power)} power).`);
+      onClose();
+    } catch (err) {
+      sfx.error();
+      say('error', err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Modal title={def.name} onClose={onClose}>
       <img className="art-large" src={asset(def.image)} alt={def.name}
@@ -247,6 +297,18 @@ function ItemDetailModal({ itemId, invRow, inv, onClose }) {
         </span>
       </p>
       <p style={{ color: 'var(--ink-dim)' }}>{def.description}</p>
+      {isWeapon && (
+        <p className="qty-badge" style={{ fontSize: '1rem' }}>
+          Power <strong style={{ color: 'var(--gold-soft)' }}>{formatPower(power)}</strong>
+          {stars > 0 && <span style={{ color: 'var(--gold)' }}> · {starDisplay(stars)}</span>}
+          {equipped && <span style={{ color: 'var(--success)' }}> · Equipped</span>}
+        </p>
+      )}
+      {isWeapon && !equipped && (
+        <button className="btn btn-sm" disabled={busy} onClick={doEquip} style={{ marginBottom: '0.5rem' }}>
+          <Icon name="sword" /> Equip for Hunts
+        </button>
+      )}
       {def.stats && (
         <p className="qty-badge">
           Power {def.stats.power} · Spirit {def.stats.spirit}
@@ -257,7 +319,7 @@ function ItemDetailModal({ itemId, invRow, inv, onClose }) {
       </button>
 
       <div className="toolbar" role="tablist" aria-label="Item actions">
-        {['info', 'sell', 'upgrade'].map((t) => (
+        {['info', 'sell', 'upgrade', ...(isWeapon ? ['merge'] : [])].map((t) => (
           <button
             key={t}
             role="tab"
@@ -270,7 +332,7 @@ function ItemDetailModal({ itemId, invRow, inv, onClose }) {
               say('info', '');
             }}
           >
-            {t === 'info' ? 'Details' : t === 'sell' ? 'List for Sale' : 'Upgrade'}
+            {t === 'info' ? 'Details' : t === 'sell' ? 'List for Sale' : t === 'upgrade' ? 'Upgrade' : 'Merge'}
           </button>
         ))}
       </div>
@@ -360,6 +422,29 @@ function ItemDetailModal({ itemId, invRow, inv, onClose }) {
                 {busy ? 'Upgrading…' : `Upgrade to Lv ${level + 1}`}
               </button>
             </>
+          )}
+        </div>
+      )}
+      {tab === 'merge' && isWeapon && (
+        <div>
+          <p>
+            Merge a duplicate <strong>{def.name}</strong> into this one to add a star and boost its power.
+          </p>
+          <p className="qty-badge" style={{ fontSize: '1rem' }}>
+            Current: {stars > 0 ? starDisplay(stars) : 'no stars'} · {formatPower(power)} power
+          </p>
+          <p style={{ color: 'var(--ink-dim)', fontSize: '0.9rem' }}>
+            You own ×{owned}. Merging consumes one copy. Max {starDisplay(maxStars)} ({maxStars} stars).
+            Each star multiplies power by 1.5×.
+          </p>
+          {!canMerge ? (
+            <p style={{ color: 'var(--gold-soft)' }}>
+              {stars >= maxStars ? `Already at max stars (${starDisplay(maxStars)}).` : 'You need at least 2 copies to merge.'}
+            </p>
+          ) : (
+            <button className="btn btn-primary" disabled={busy} onClick={doMerge}>
+              {busy ? 'Merging…' : `Merge → ${starDisplay(stars === 0 ? 2 : stars + 1)}`}
+            </button>
           )}
         </div>
       )}
