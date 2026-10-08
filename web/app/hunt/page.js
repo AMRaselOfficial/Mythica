@@ -5,9 +5,10 @@ import Protected from '../components/Protected.js';
 import { ErrorNotice, EmptyState } from '../components/ui.js';
 import { Icon, BigIcon } from '../components/icons.js';
 import { useAuth } from '../../contexts/AuthContext.js';
-import content, { rarityColor, itemById } from '../../lib/content.js';
+import content, { rarityColor, itemById, weaponPower, formatPower, starDisplay, maxUnlockedRarity } from '../../lib/content.js';
 import { api, ApiError, newIdempotencyKey } from '../../lib/api.js';
-import { getApiUrl } from '../../lib/firebase.js';
+import { getApiUrl, getFirebase } from '../../lib/firebase.js';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { sfx } from '../../lib/audio.js';
 import { link } from '../../lib/paths.js';
 
@@ -38,7 +39,7 @@ export default function HuntPage() {
 }
 
 function HuntInner() {
-  const { player, configured } = useAuth();
+  const { player, user, configured } = useAuth();
   const router = useRouter();
   const [phase, setPhase] = useState('idle'); // idle|waking|hunting|result|cooldown|asleep
   const [wakeStep, setWakeStep] = useState(0); // 0 fireflies, 1 mist, 2 roar
@@ -47,8 +48,41 @@ function HuntInner() {
   const [error, setError] = useState('');
   const [cooldownMs, setCooldownMs] = useState(0);
   const [showFanfare, setShowFanfare] = useState(false);
+  const [equippedInfo, setEquippedInfo] = useState(null); // {item, power, stars, maxRarity}
   const timers = useRef([]);
   const alive = useRef(true);
+
+  // Load the equipped weapon's power for the rarity display.
+  useEffect(() => {
+    const fb = getFirebase();
+    if (!fb || !user) return;
+    const equippedId = player?.equippedWeaponId;
+    if (!equippedId) {
+      setEquippedInfo(null);
+      return;
+    }
+    const unsub = onSnapshot(
+      collection(fb.db, 'inventories', user.uid, 'items'),
+      (snap) => {
+        const row = snap.docs.find((d) => d.id === equippedId);
+        const item = itemById(equippedId);
+        if (row && item && item.type === 'weapon') {
+          const d = row.data();
+          const power = weaponPower(item, d.upgradeLevel || 0, d.stars || 0);
+          setEquippedInfo({
+            item,
+            power,
+            stars: d.stars || 0,
+            maxRarity: maxUnlockedRarity(power),
+          });
+        } else {
+          setEquippedInfo(null);
+        }
+      },
+      () => setEquippedInfo(null)
+    );
+    return unsub;
+  }, [user, player?.equippedWeaponId]);
 
   const later = useCallback((fn, ms) => {
     const id = setTimeout(() => {
@@ -189,6 +223,25 @@ function HuntInner() {
         The wilds beyond the treeline stir with sprites and forgotten weapons. Hunts take time —
         the forest reveals its secrets only to the patient.
       </p>
+
+      {equippedInfo && (
+        <div className="card" style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span style={{ color: 'var(--gold-soft)' }}><Icon name="sword" size="1.6rem" /></span>
+          <div>
+            <div style={{ fontWeight: 600 }}>
+              {equippedInfo.item.name}
+              {equippedInfo.stars > 0 && <span style={{ color: 'var(--gold)' }}> {starDisplay(equippedInfo.stars)}</span>}
+            </div>
+            <div style={{ color: 'var(--ink-dim)', fontSize: '0.9rem' }}>
+              Power {formatPower(equippedInfo.power)} · can find up to{' '}
+              <strong style={{ color: rarityColor(equippedInfo.maxRarity) }}>{equippedInfo.maxRarity}</strong>
+            </div>
+          </div>
+          <a href={link('/inventory')} className="btn btn-sm" style={{ marginLeft: 'auto' }} onClick={() => sfx.click()}>
+            Change
+          </a>
+        </div>
+      )}
 
       {error && <ErrorNotice message={error} onRetry={() => setError('')} />}
 
