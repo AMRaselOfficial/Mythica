@@ -1,14 +1,21 @@
+'use strict';
 /**
- * Verified email providers for new Mythica accounts (client-side pre-check).
+ * Verified email providers for new Mythica accounts.
  *
- * Must stay in sync with:
- *  1. server/lib/emailProviders.js (server-side backup)
- *  2. firestore.rules — `players/{uid}` allow create (the real enforcement)
+ * New players may only sign up with an address from a reputable mail
+ * provider (Gmail, Outlook, Yahoo, Proton Mail, …). This cuts down on
+ * throwaway / disposable-email spam accounts.
  *
- * server/tests/emailProviders.test.js asserts the domain lists match.
+ * Enforcement points (keep in sync):
+ *  1. firestore.rules — `players/{uid}` allow create checks the domain.
+ *  2. web/lib/emailProviders.js — client-side pre-check on the signup form.
+ *  3. This module — server-side backup in lazy player creation (hunt/market).
+ *
+ * When adding a provider, update all three. tests/emailProviders.test.js
+ * asserts this list matches web/lib/emailProviders.js.
  */
 
-export const ALLOWED_DOMAINS = [
+const ALLOWED_DOMAINS = [
   // Google
   'gmail.com',
   'googlemail.com',
@@ -86,7 +93,7 @@ export const ALLOWED_DOMAINS = [
 const ALLOWED_SET = new Set(ALLOWED_DOMAINS);
 
 /** Extract the lowercase domain from an email address. Empty string when invalid. */
-export function emailDomain(email) {
+function emailDomain(email) {
   const e = String(email || '').trim().toLowerCase();
   const at = e.lastIndexOf('@');
   if (at <= 0 || at === e.length - 1) return '';
@@ -96,9 +103,18 @@ export function emailDomain(email) {
 }
 
 /** True when the address belongs to a verified mail provider. */
-export function isAllowedEmail(email) {
+function isAllowedEmail(email) {
   return ALLOWED_SET.has(emailDomain(email));
 }
 
-/** Short, friendly names for the signup hint. */
-export const PROVIDER_HINT = 'Gmail, Outlook, Yahoo, Proton Mail, iCloud and other major providers';
+/**
+ * Gate for lazy server-side player creation: returns the error code when a
+ * known email address is not from a verified provider, null otherwise.
+ * Empty/unknown emails pass (the Firestore create rule is the primary gate).
+ */
+function newPlayerEmailError(email) {
+  if (email && !isAllowedEmail(email)) return 'email_provider_not_allowed';
+  return null;
+}
+
+module.exports = { ALLOWED_DOMAINS, emailDomain, isAllowedEmail, newPlayerEmailError };
