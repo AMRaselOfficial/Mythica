@@ -107,6 +107,9 @@ function DashboardInner() {
         <a className="btn" href={link('/veyra')} onClick={() => sfx.click()}>
           <Icon name="mail" /> Veyra
         </a>
+        <a className="btn" href={link('/support')} onClick={() => sfx.click()}>
+          <Icon name="help" /> Support
+        </a>
       </div>
 
       {featured && (
