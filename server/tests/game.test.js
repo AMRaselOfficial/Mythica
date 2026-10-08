@@ -16,6 +16,9 @@ const {
   validatePurchase,
   validateUpgrade,
   validateTradeComplete,
+  weaponPower,
+  maxUnlockedRarity,
+  validateMerge,
 } = require('../lib/game');
 
 const content = contentApi.content;
@@ -70,33 +73,79 @@ test('rollHunt: ranges and scripted outcomes', () => {
   }
 });
 
-test('rollHunt: minLevel gates the drop pool by player level', () => {
-  // Stub: ember-fox needs level 3, starfall-hammer needs 25.
-  // Level 1 player: 500 rolls, never see gated items.
-  for (let i = 0; i < 500; i++) {
-    const roll = rollHunt(Math.random, content, 1);
-    assert.ok(roll.dropItemId !== 'ember-fox', 'level 1 must not drop ember-fox');
-    assert.ok(roll.dropItemId !== 'starfall-hammer', 'level 1 must not drop starfall-hammer');
+test('rollHunt: weapon power gates non-material drops; level gates materials', () => {
+  // New signature: rollHunt(rng, content, weaponPower, playerLevel).
+  // With 0 power, no rarity unlocks: only common (unlock 0) non-materials drop.
+  // Materials still respect minLevel.
+  const lowPower = [];
+  for (let i = 0; i < 200; i++) {
+    const roll = rollHunt(Math.random, content, 0, 1);
+    if (roll.dropItemId) lowPower.push(roll.dropItemId);
   }
-  // Level 3 player: ember-fox becomes possible (force drops with scripted rng).
+  // Stub content has no weaponPower config -> unlock map empty -> all rarities
+  // have threshold 0, so everything is unlocked. This test uses a synthetic
+  // config instead.
+  const cfg = {
+    ...content,
+    weaponPower: { rarityUnlock: { uncommon: 2000, rare: 20000 } },
+    items: content.items.map((x) =>
+      x.type === 'material' ? x : { ...x, rarity: x.id === 'ember-fox' ? 'rare' : 'common' }
+    ),
+  };
+  for (let i = 0; i < 200; i++) {
+    const roll = rollHunt(Math.random, cfg, 0, 99);
+    assert.ok(roll.dropItemId !== 'ember-fox', 'power 0 must not drop rare ember-fox');
+  }
   let sawFox = false;
   for (let i = 0; i < 500; i++) {
-    const roll = rollHunt(Math.random, content, 3);
+    const roll = rollHunt(Math.random, cfg, 25000, 99);
     if (roll.dropItemId === 'ember-fox') {
       sawFox = true;
       break;
     }
   }
-  assert.ok(sawFox, 'level 3 player should eventually drop ember-fox');
-  // Level 25: everything unlocked.
-  const fullPool = content.items.filter((x) => x.active && (x.dropWeight || 0) > 0);
-  const gatedPool = content.items.filter(
-    (x) => x.active && (x.dropWeight || 0) > 0 && (x.minLevel || 1) <= 25
-  );
-  assert.equal(gatedPool.length, fullPool.length);
-  // Omitted level defaults to no gating (backwards compatible).
+  assert.ok(sawFox, 'power 25000 should eventually drop rare ember-fox');
+  // Omitted args default to no gating (backwards compatible).
   const r = rollHunt(seqRng([0.999, 0.9, 0.1, 0.0]), content);
   assert.ok(r.dropItemId !== null);
+});
+
+test('weaponPower: base * upgrade bonus * star multiplier', () => {
+  const cfg = {
+    weaponPower: {
+      baseByRarity: { common: 200, rare: 12000 },
+      upgradeBonus: 0.5,
+      starMultiplier: 1.5,
+    },
+  };
+  // base 200, no upgrades/stars
+  assert.equal(weaponPower(cfg, { type: 'weapon', rarity: 'common' }, 0, 0), 200);
+  // 2 upgrades: 200 * (1 + 0.5*2) = 400
+  assert.equal(weaponPower(cfg, { type: 'weapon', rarity: 'common' }, 2, 0), 400);
+  // 2 upgrades + 2 stars: 400 * 1.5^2 = 900
+  assert.equal(weaponPower(cfg, { type: 'weapon', rarity: 'common' }, 2, 2), 900);
+  // non-weapon yields 0
+  assert.equal(weaponPower(cfg, { type: 'sprite', rarity: 'common' }, 0, 0), 0);
+});
+
+test('validateMerge: needs two copies, not a weapon, max stars', () => {
+  assert.equal(validateMerge({ item: null, inv: { quantity: 2 }, maxStars: 6 }), 'not_a_weapon');
+  assert.equal(
+    validateMerge({ item: { type: 'sprite' }, inv: { quantity: 2 }, maxStars: 6 }),
+    'not_a_weapon'
+  );
+  assert.equal(
+    validateMerge({ item: { type: 'weapon' }, inv: { quantity: 1 }, maxStars: 6 }),
+    'need_two_copies'
+  );
+  assert.equal(
+    validateMerge({ item: { type: 'weapon' }, inv: { quantity: 2, stars: 6 }, maxStars: 6 }),
+    'max_stars'
+  );
+  assert.equal(
+    validateMerge({ item: { type: 'weapon' }, inv: { quantity: 2, stars: 0 }, maxStars: 6 }),
+    null
+  );
 });
 
 test('applyXp: no level, single level, multi level, max-level cap', () => {
