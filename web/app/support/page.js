@@ -82,7 +82,7 @@ function SupportInner() {
     setSubmitting(true);
     try {
       const out = await api.supportCreate(t, d);
-      sfx.success();
+      sfx.levelup();
       setJustCreated(out.ticket);
       setTitle('');
       setDescription('');
