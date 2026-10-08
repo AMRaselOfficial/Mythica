@@ -21,22 +21,72 @@ function weightedPick(rng, pool) {
 /**
  * Roll a hunt: { xpGained, petalsFound, dropItemId|null }.
  * Data-driven: rolls only active items from the content's item list.
- * playerLevel gates the pool: items with minLevel above the player's level
- * cannot drop (rare finds need higher levels). Defaults to no gating.
+ * weaponPower gates non-material drops: an item whose rarity has an unlock
+ * threshold above the equipped weapon's power cannot drop (rare finds need
+ * stronger weapons). Materials are still gated by playerLevel (minLevel).
+ * Defaults to no gating.
  */
-function rollHunt(rng, content, playerLevel = Infinity) {
+function rollHunt(rng, content, weaponPower = Infinity, playerLevel = Infinity) {
   const h = content.hunt;
   const xpGained = randInt(rng, h.xpMin, h.xpMax);
   const petalsFound =
     rng() < h.petalFindChance ? randInt(rng, h.petalFindMin, h.petalFindMax) : 0;
   let dropItemId = null;
   if (rng() < h.dropChance) {
-    const pool = content.items.filter(
-      (i) => i.active && (i.dropWeight || 0) > 0 && (i.minLevel || 1) <= playerLevel
-    );
+    const unlock = (content.weaponPower && content.weaponPower.rarityUnlock) || {};
+    const rarityOrder = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+    const pool = content.items.filter((i) => {
+      if (!i.active || (i.dropWeight || 0) <= 0) return false;
+      if (i.type === 'material') return (i.minLevel || 1) <= playerLevel;
+      const need = unlock[i.rarity] || 0;
+      return weaponPower >= need;
+    });
     if (pool.length > 0) dropItemId = weightedPick(rng, pool).id;
   }
   return { xpGained, petalsFound, dropItemId };
+}
+
+/**
+ * Weapon power: base by rarity, boosted by upgrade level and merge stars.
+ * power = base * (1 + upgradeBonus * upgradeLevel) * starMultiplier^stars
+ * Returns an integer. Unknown items yield 0.
+ */
+function weaponPower(content, item, upgradeLevel = 0, stars = 0) {
+  if (!item || item.type !== 'weapon') return 0;
+  const cfg = (content && content.weaponPower) || {};
+  const base = (cfg.baseByRarity && cfg.baseByRarity[item.rarity]) || 0;
+  const upBonus = cfg.upgradeBonus != null ? cfg.upgradeBonus : 0.5;
+  const starMult = cfg.starMultiplier != null ? cfg.starMultiplier : 1.5;
+  const upg = Math.max(0, upgradeLevel || 0);
+  const st = Math.max(0, stars || 0);
+  return Math.round(base * (1 + upBonus * upg) * Math.pow(starMult, st));
+}
+
+/**
+ * Highest rarity the given weapon power can find. Returns a rarity id.
+ */
+function maxUnlockedRarity(content, power) {
+  const unlock = (content.weaponPower && content.weaponPower.rarityUnlock) || {};
+  let best = 'common';
+  for (const [rarity, need] of Object.entries(unlock)) {
+    if (power >= need) best = rarity;
+  }
+  // Order check: keep the highest tier in canonical order.
+  const order = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'];
+  let idx = 0;
+  for (const [rarity, need] of Object.entries(unlock)) {
+    if (power >= need) idx = Math.max(idx, order.indexOf(rarity));
+  }
+  return order[idx];
+}
+
+/** Merge validation. Returns an error code or null. */
+function validateMerge({ item, inv, maxStars }) {
+  if (!item || item.type !== 'weapon') return 'not_a_weapon';
+  if (!inv || (inv.quantity || 0) < 2) return 'need_two_copies';
+  const stars = inv.stars || 0;
+  if (stars >= (maxStars != null ? maxStars : 6)) return 'max_stars';
+  return null;
 }
 
 /**
@@ -106,4 +156,7 @@ module.exports = {
   validatePurchase,
   validateUpgrade,
   validateTradeComplete,
+  weaponPower,
+  maxUnlockedRarity,
+  validateMerge,
 };
