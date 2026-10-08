@@ -6,6 +6,7 @@ import { link } from '../../lib/paths.js';
 import { sfx } from '../../lib/audio.js';
 import { ErrorNotice } from '../components/ui.js';
 import { friendlyAuthError } from '../login/page.js';
+import { isAllowedEmail, PROVIDER_HINT } from '../../lib/emailProviders.js';
 
 export default function SignupPage() {
   const { signup, configured } = useAuth();
@@ -19,9 +20,17 @@ export default function SignupPage() {
   const submit = async (e) => {
     e.preventDefault();
     setError('');
+    const cleanEmail = email.trim();
+    if (!isAllowedEmail(cleanEmail)) {
+      sfx.error();
+      setError(
+        `Please sign up with an address from a verified mail provider (${PROVIDER_HINT}).`
+      );
+      return;
+    }
     setBusy(true);
     try {
-      await signup(email.trim(), password, displayName.trim());
+      await signup(cleanEmail, password, displayName.trim());
       sfx.levelup();
       router.push('/dashboard');
     } catch (err) {
@@ -88,6 +97,9 @@ export default function SignupPage() {
           <button className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%' }}>
             {busy ? 'Kindling your lantern…' : 'Create Account'}
           </button>
+          <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+            We accept addresses from verified mail providers ({PROVIDER_HINT}).
+          </p>
           <p style={{ marginBottom: 0 }}>
             Already wander these woods? <a href={link('/login')}>Sign in</a>
           </p>
