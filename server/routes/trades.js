@@ -7,9 +7,11 @@
  * them, marks the trade completed. Idempotent via `idempotency/{key}`.
  */
 const express = require('express');
-const { db } = require('../lib/db');
+const { db, USE_FAKE } = require('../lib/db');
 const { activityEntry } = require('../lib/activity');
-const { validateTradeComplete } = require('../lib/game');
+const { validateTradeComplete, applyXp } = require('../lib/game');
+const contentApi = require('../lib/content');
+const { checkAndGrant } = require('../lib/achievementsTx');
 
 const router = express.Router();
 
@@ -54,7 +56,7 @@ router.post('/trades/complete', async (req, res) => {
     const out = await db.runTransaction(async (tx) => {
       const idemRef = db.collection('idempotency').doc(idempotencyKey);
       const idemSnap = await tx.get(idemRef);
-      if (idemSnap.exists) return { result: idemSnap.data().result };
+      if (idemSnap.exists) return { result: idemSnap.data().result, replay: true };
 
       const tradeRef = db.collection('trades').doc(tradeId);
       const tSnap = await tx.get(tradeRef);
@@ -103,13 +105,22 @@ router.post('/trades/complete', async (req, res) => {
       });
       tx.set(logRef, logDoc);
 
-      const result = { ok: true };
+      const result = { ok: true, offeredBy: trade.offeredBy, offeredTo: trade.offeredTo };
       tx.set(idemRef, { key: idempotencyKey, result, createdAt: now });
       return { result };
     });
 
     if (out.error) return res.status(400).json({ ok: false, error: out.error });
-    return res.json(out.result);
+    // Best-effort: trade-count achievements for both parties. Never blocks.
+    // Skipped on idempotent replays so stats aren't double-counted.
+    if (!out.replay && out.result && out.result.offeredBy) {
+      for (const party of [out.result.offeredBy, out.result.offeredTo]) {
+        checkAndGrant(db, USE_FAKE, contentApi.content, (id) => contentApi.getItem(id), applyXp, party, {
+          trades: 1,
+        }).catch(() => {});
+      }
+    }
+    return res.json({ ok: true });
   } catch (e) {
     console.error('POST /api/trades/complete failed:', e);
     return res.status(500).json({ ok: false, error: 'internal' });
