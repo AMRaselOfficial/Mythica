@@ -2,7 +2,7 @@
 /**
  * POST /api/hunt
  * Transactional hunt: cooldown check (server time), set lastHuntAt at START,
- * roll, apply, commit — THEN sleep the theater delay and respond.
+ * roll, apply, commit — then respond immediately.
  */
 const express = require('express');
 const { db, USE_FAKE } = require('../lib/db');
@@ -32,14 +32,6 @@ async function newPlayer(now, uid) {
     accountStatus: 'active',
   };
 }
-
-function theaterMs() {
-  const min = Number(process.env.THEATER_MIN_MS ?? 10000);
-  const max = Number(process.env.THEATER_MAX_MS ?? 30000);
-  return min + Math.random() * Math.max(0, max - min);
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 router.post('/hunt', async (req, res) => {
   const uid = req.uid;
@@ -161,9 +153,6 @@ router.post('/hunt', async (req, res) => {
     if (out.error === 'email_provider_not_allowed') {
       return res.status(403).json({ ok: false, error: 'email_provider_not_allowed' });
     }
-
-    // Theater delay happens AFTER the transaction commits.
-    await sleep(theaterMs());
 
     // Best-effort: progress any joined hunt_count events. Never blocks the response.
     bumpHuntEventProgress(db, USE_FAKE, uid).catch(() => {});
