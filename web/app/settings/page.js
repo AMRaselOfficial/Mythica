@@ -1,10 +1,16 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { doc, updateDoc } from 'firebase/firestore';
+import {
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updatePassword,
+} from 'firebase/auth';
 import Protected from '../components/Protected.js';
 import { ErrorNotice } from '../components/ui.js';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { getFirebase } from '../../lib/firebase.js';
+import { friendlyAuthError } from '../login/page.js';
 import {
   isMusicEnabled,
   isSfxEnabled,
@@ -29,6 +35,12 @@ function SettingsInner() {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState('');
   const [error, setError] = useState('');
+  const [oldPw, setOldPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwSaved, setPwSaved] = useState('');
+  const [pwError, setPwError] = useState('');
 
   // Seed from the authoritative player doc (falls back to localStorage via audio lib).
   useEffect(() => {
@@ -64,6 +76,51 @@ function SettingsInner() {
     }
     await persist({ displayName: name });
     sfx.click();
+  };
+
+  const changePassword = async (e) => {
+    e.preventDefault();
+    setPwError('');
+    setPwSaved('');
+    if (!oldPw) {
+      setPwError('Enter your current password.');
+      return;
+    }
+    if (newPw.length < 6) {
+      setPwError('Choose a new password of at least 6 characters.');
+      return;
+    }
+    if (newPw !== confirmPw) {
+      sfx.error();
+      setPwError('The two new passwords do not match.');
+      return;
+    }
+    if (newPw === oldPw) {
+      setPwError('The new password must be different from the old one.');
+      return;
+    }
+    const fb = getFirebase();
+    if (!fb || !user?.email) {
+      setPwError('Could not verify your session. Try signing in again.');
+      return;
+    }
+    setPwBusy(true);
+    try {
+      const cred = EmailAuthProvider.credential(user.email, oldPw);
+      await reauthenticateWithCredential(fb.auth.currentUser, cred);
+      await updatePassword(fb.auth.currentUser, newPw);
+      setOldPw('');
+      setNewPw('');
+      setConfirmPw('');
+      sfx.levelup();
+      setPwSaved('Password changed.');
+      setTimeout(() => setPwSaved(''), 3000);
+    } catch (err) {
+      sfx.error();
+      setPwError(friendlyAuthError(err));
+    } finally {
+      setPwBusy(false);
+    }
   };
 
   // INDEPENDENT toggles: music and SFX are separate flags, persisted both to
@@ -165,6 +222,58 @@ function SettingsInner() {
         <p className="qty-badge" style={{ margin: 0 }}>
           Signed in as {user?.email}
         </p>
+      </div>
+
+      <div className="card" style={{ marginTop: '1.25rem' }}>
+        <h2 className="serif" style={{ marginTop: 0 }}>
+          Change password
+        </h2>
+        {pwError && <ErrorNotice message={pwError} />}
+        {pwSaved && (
+          <div className="notice notice-info" role="status" style={{ marginBottom: '0.75rem' }}>
+            {pwSaved}
+          </div>
+        )}
+        <form onSubmit={changePassword}>
+          <div className="field">
+            <label htmlFor="oldPw">Current password</label>
+            <input
+              id="oldPw"
+              className="input"
+              type="password"
+              autoComplete="current-password"
+              value={oldPw}
+              onChange={(e) => setOldPw(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="newPw">New password</label>
+            <input
+              id="newPw"
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              minLength={6}
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="confirmPw">Confirm new password</label>
+            <input
+              id="confirmPw"
+              className="input"
+              type="password"
+              autoComplete="new-password"
+              minLength={6}
+              value={confirmPw}
+              onChange={(e) => setConfirmPw(e.target.value)}
+            />
+          </div>
+          <button className="btn btn-primary btn-sm" type="submit" disabled={pwBusy}>
+            {pwBusy ? 'Changing…' : 'Change password'}
+          </button>
+        </form>
       </div>
     </div>
   );
