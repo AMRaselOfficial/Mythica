@@ -230,7 +230,14 @@ function ProfileInner() {
         />
       )}
       {(content.achievements || []).length > 0 && (
-        <div className="row-list">
+        <div
+          className="row-list"
+          style={{
+            maxHeight: '375px',
+            overflowY: 'auto',
+            paddingRight: '0.25rem',
+          }}
+        >
           {(content.achievements || []).map((def) => {
             const a = (achievements || []).find((x) => x.id === def.id);
             const completed = !!a?.completed;
