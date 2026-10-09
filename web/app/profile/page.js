@@ -41,12 +41,20 @@ function ProfileInner() {
       snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
       setAchievements(rows);
     });
-    const un3 = onSnapshot(collection(fb.db, 'players', user.uid, 'medals'), (snap) => {
-      const rows = [];
-      snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
-      rows.sort((a, b) => (b.awardedAt || 0) - (a.awardedAt || 0));
-      setMedals(rows);
-    });
+    const un3 = onSnapshot(
+      collection(fb.db, 'players', user.uid, 'medals'),
+      (snap) => {
+        const rows = [];
+        snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
+        rows.sort((a, b) => (b.awardedAt || 0) - (a.awardedAt || 0));
+        setMedals(rows);
+      },
+      () => {
+        // If the read is denied (e.g. rules not yet published), show empty
+        // instead of hanging on the loading state.
+        setMedals([]);
+      }
+    );
     return () => {
       un1();
       un2();
