@@ -51,6 +51,7 @@ app.use(
   require('./routes/redeem'),
   require('./routes/events'),
   require('./routes/support'),
+  require('./routes/leaderboard'),
   require('./routes/admin')
 );
 
