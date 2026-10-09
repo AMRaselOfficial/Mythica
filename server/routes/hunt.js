@@ -13,6 +13,7 @@ const { rollHunt, applyXp, weaponPower, maxUnlockedRarity } = require('../lib/ga
 const { generateUniqueCode } = require('../lib/playerCode');
 const { bumpHuntEventProgress } = require('../lib/events');
 const { newPlayerEmailError } = require('../lib/emailProviders');
+const { syncBestWeaponPower } = require('../lib/leaderboard');
 const {
   readEarned,
   grantNewlyEarned,
@@ -302,6 +303,12 @@ router.post('/hunt', async (req, res) => {
 
     // Best-effort: progress any joined hunt_count events. Never blocks the response.
     bumpHuntEventProgress(db, USE_FAKE, uid).catch(() => {});
+
+    // Best-effort: refresh best weapon power (a hunt can grant weapons).
+    // Runs outside the transaction (reads after the commit).
+    db.runTransaction(async (tx) => {
+      await syncBestWeaponPower(tx, uid);
+    }).catch(() => {});
 
     return res.json(out);
   } catch (e) {
