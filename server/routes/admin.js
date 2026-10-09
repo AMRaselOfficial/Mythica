@@ -283,6 +283,12 @@ router.post('/admin/users/:uid/inventory/add', async (req, res) => {
       }
     });
     await safeLog({ uid: targetUid, type: 'admin_grant_item', details: { itemId, quantity: qty, byUid: req.uid } });
+    // Best-effort: refresh best weapon power if a weapon was granted.
+    if (item.type === 'weapon') {
+      db.runTransaction(async (tx) => {
+        await syncBestWeaponPower(tx, targetUid);
+      }).catch(() => {});
+    }
     res.json({ ok: true, itemId, quantityAdded: qty });
   } catch (e) {
     console.error('POST /api/admin/users/:uid/inventory/add failed:', e);
@@ -497,6 +503,7 @@ const {
   eventJoinId,
   medalGrantId,
 } = require('../lib/events');
+const { syncBestWeaponPower } = require('../lib/leaderboard');
 
 function slugify(title) {
   const s = String(title || '')
@@ -506,6 +513,41 @@ function slugify(title) {
     .slice(0, 40);
   return (s || 'event') + '-' + Date.now().toString(36);
 }
+
+/* ------------------------------------------------------------------ *
+ * Leaderboard maintenance.
+ *
+ * POST /api/admin/leaderboard/backfill — recompute bestWeaponPower for all
+ * players (one-time after the leaderboard launches). Bounded to 2000 players.
+ * ------------------------------------------------------------------ */
+
+router.post('/admin/leaderboard/backfill', async (req, res) => {
+  try {
+    let playerIds;
+    if (USE_FAKE) {
+      playerIds = db._listAll('players').map(({ id }) => id);
+    } else {
+      const snap = await db.collection('players').select().get();
+      playerIds = snap.docs.map((d) => d.id);
+    }
+    let synced = 0;
+    for (const uid of playerIds.slice(0, 2000)) {
+      try {
+        await db.runTransaction(async (tx) => {
+          await syncBestWeaponPower(tx, uid);
+        });
+        synced += 1;
+      } catch {
+        /* per-player best-effort */
+      }
+    }
+    await safeLog({ uid: req.uid, type: 'admin_leaderboard_backfill', details: { synced, byUid: req.uid } });
+    res.json({ ok: true, synced });
+  } catch (e) {
+    console.error('POST /api/admin/leaderboard/backfill failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
 
 router.get('/admin/events', async (req, res) => {
   try {
