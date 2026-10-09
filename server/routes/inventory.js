@@ -18,6 +18,7 @@ const {
   weaponSummary,
   listInventory,
 } = require('../lib/achievementsTx');
+const { syncBestWeaponPower } = require('../lib/leaderboard');
 
 const router = express.Router();
 
@@ -121,6 +122,10 @@ router.post('/inventory/merge', async (req, res) => {
     });
 
     if (out.error) return res.status(400).json({ ok: false, error: out.error });
+    // Best-effort: refresh best weapon power (merge raises it).
+    db.runTransaction(async (tx) => {
+      await syncBestWeaponPower(tx, uid);
+    }).catch(() => {});
     return res.json(out);
   } catch (e) {
     console.error('POST /api/inventory/merge failed:', e);
