@@ -25,6 +25,7 @@ function ProfileInner() {
   const { user, player } = useAuth();
   const [inv, setInv] = useState(null);
   const [achievements, setAchievements] = useState(null);
+  const [medals, setMedals] = useState(null);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -40,9 +41,16 @@ function ProfileInner() {
       snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
       setAchievements(rows);
     });
+    const un3 = onSnapshot(collection(fb.db, 'players', user.uid, 'medals'), (snap) => {
+      const rows = [];
+      snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
+      rows.sort((a, b) => (b.awardedAt || 0) - (a.awardedAt || 0));
+      setMedals(rows);
+    });
     return () => {
       un1();
       un2();
+      un3();
     };
   }, [user]);
 
@@ -155,6 +163,52 @@ function ProfileInner() {
               <RarityTag rarity={favorite.rarity} />
             </div>
           </div>
+        </div>
+      )}
+
+      <h2 className="serif">Event Medals</h2>
+      {!medals && <LoadingBlock label="Polishing medals" />}
+      {medals && medals.length === 0 && (
+        <EmptyState
+          icon="trophy"
+          title="No medals yet"
+          body="Win an event challenge to earn a gold-framed medal on your profile."
+        />
+      )}
+      {medals && medals.length > 0 && (
+        <div className="row-list">
+          {medals.map((m) => {
+            const tierColor =
+              m.medalTier === 'gold' ? '#e8b923' : m.medalTier === 'silver' ? '#b8c0cc' : '#cd7f32';
+            return (
+              <div
+                className="row-item"
+                key={m.id}
+                style={{
+                  border: '2px solid var(--gold-soft, #d8b36a)',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, rgba(216,179,106,0.12), rgba(216,179,106,0.03))',
+                }}
+              >
+                <span style={{ color: tierColor }} aria-hidden="true">
+                  <Icon name="trophy" size="1.8rem" />
+                </span>
+                <div className="grow">
+                  <p className="title">{m.medalName || 'Event Medal'}</p>
+                  <p className="sub">
+                    {m.eventTitle || 'Mythica event'}
+                    {m.awardedAt ? ` · ${new Date(m.awardedAt).toLocaleDateString()}` : ''}
+                  </p>
+                </div>
+                <span
+                  className="rarity-tag"
+                  style={{ '--rarity': tierColor, textTransform: 'capitalize' }}
+                >
+                  {m.medalTier || 'gold'}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
 
