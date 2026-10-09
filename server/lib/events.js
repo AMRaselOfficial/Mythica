@@ -21,8 +21,27 @@ const TYPE_LABELS = {
   minigame: 'Mini-game',
 };
 
+const MEDAL_TIERS = ['gold', 'silver', 'bronze'];
+
+const DEFAULT_MEDAL_NAMES = {
+  gold: 'Champion',
+  silver: 'Runner-up',
+  bronze: 'Third Place',
+};
+
+const TIER_LABELS = {
+  gold: 'Gold',
+  silver: 'Silver',
+  bronze: 'Bronze',
+};
+
 function eventJoinId(eventId, uid) {
   return `${eventId}_${uid}`;
+}
+
+/** Medal grant doc id inside players/{uid}/medals. */
+function medalGrantId(eventId, medalIndex) {
+  return `${eventId}_${medalIndex}`;
 }
 
 /** Normalize a Firestore Timestamp / Date / epoch ms to epoch ms. */
@@ -67,6 +86,19 @@ function sanitizeRewards(raw) {
   };
 }
 
+/** Sanitize the 0–3 medal definitions attached to an event. */
+function sanitizeMedals(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const m of raw.slice(0, 3)) {
+    const tier = String((m && m.tier) || '').toLowerCase();
+    const finalTier = MEDAL_TIERS.includes(tier) ? tier : MEDAL_TIERS[out.length] || 'bronze';
+    const name = String((m && m.name) || '').trim().slice(0, 40) || DEFAULT_MEDAL_NAMES[finalTier];
+    out.push({ name, tier: finalTier });
+  }
+  return out;
+}
+
 /** Validate + normalize an event payload for create/update. Returns { event } or { error }. */
 function normalizeEventInput(body) {
   const title = String((body && body.title) || '').trim().slice(0, 80);
@@ -92,6 +124,7 @@ function normalizeEventInput(body) {
       type,
       goal,
       rewards: sanitizeRewards(body && body.rewards),
+      medals: sanitizeMedals(body && body.medals),
     },
   };
 }
@@ -111,6 +144,7 @@ function publicEvent(id, data) {
     typeLabel: TYPE_LABELS[data.type] || TYPE_LABELS.hunt_count,
     goal: Math.max(1, Math.floor(Number(data.goal) || 1)),
     rewards: sanitizeRewards(data.rewards),
+    medals: sanitizeMedals(data.medals),
     live: isLive(data),
     ended: hasEnded(data),
   };
@@ -199,11 +233,16 @@ async function bumpHuntEventProgress(db, useFake, uid) {
 module.exports = {
   EVENT_TYPES,
   TYPE_LABELS,
+  MEDAL_TIERS,
+  DEFAULT_MEDAL_NAMES,
+  TIER_LABELS,
   eventJoinId,
+  medalGrantId,
   toMillis,
   isLive,
   hasEnded,
   sanitizeRewards,
+  sanitizeMedals,
   normalizeEventInput,
   publicEvent,
   countInvites,
