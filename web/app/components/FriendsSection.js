@@ -185,7 +185,10 @@ export default function FriendsSection() {
           <h3 className="serif" style={{ marginTop: 0 }}>
             Your friends ({friends.length})
           </h3>
-          {friends.map((f) => (
+          <div style={{ maxHeight: '270px', overflowY: 'auto', paddingRight: '0.25rem' }}>
+          {[...friends]
+            .sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+            .map((f) => (
             <div
               key={f.id}
               style={{
@@ -215,6 +218,7 @@ export default function FriendsSection() {
               </button>
             </div>
           ))}
+          </div>
         </div>
       )}
 
