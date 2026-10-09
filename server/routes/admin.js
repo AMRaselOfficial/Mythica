@@ -494,6 +494,8 @@ const {
   normalizeEventInput,
   publicEvent,
   whereEquals,
+  eventJoinId,
+  medalGrantId,
 } = require('../lib/events');
 
 function slugify(title) {
@@ -643,6 +645,146 @@ router.get('/admin/events/:id/joins', async (req, res) => {
     });
   } catch (e) {
     console.error('GET /api/admin/events/:id/joins failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * Event medals — attach up to 3 named medals per event (via the event
+ * create/update payload), then award each medal to one participant.
+ * The grant lives in players/{uid}/medals/{eventId}_{medalIndex} and
+ * shows as a gold-framed award on the player's profile.
+ *
+ * GET    /api/admin/events/:id/medals                 list awarded medals
+ * POST   /api/admin/events/:id/medals/award          { medalIndex, uid }
+ * DELETE /api/admin/events/:id/medals/:medalIndex/:uid   revoke a medal
+ *
+ * Error codes: not_found, bad_medal, not_joined, already_awarded
+ * ------------------------------------------------------------------ */
+
+router.get('/admin/events/:id/medals', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').slice(0, 80);
+    const eventSnap = await db.collection('events').doc(id).get();
+    if (!eventSnap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    const ev = publicEvent(id, eventSnap.data());
+
+    // Collect grants across all players: query each join's player doc.
+    const joins = await whereEquals(db, USE_FAKE, 'eventJoins', 'eventId', id);
+    const awarded = [];
+    for (const j of joins.slice(0, 500)) {
+      const uid = j.data.uid;
+      for (let i = 0; i < ev.medals.length; i++) {
+        try {
+          const gsnap = await db
+            .collection('players')
+            .doc(uid)
+            .collection('medals')
+            .doc(medalGrantId(id, i))
+            .get();
+          if (gsnap.exists) {
+            const g = gsnap.data();
+            awarded.push({
+              medalIndex: i,
+              medalName: g.medalName,
+              medalTier: g.medalTier,
+              uid,
+              displayName: g.displayName || j.data.displayName || 'Traveler',
+              awardedAt: g.awardedAt || 0,
+            });
+          }
+        } catch {
+          /* non-fatal per-player */
+        }
+      }
+    }
+    awarded.sort((a, b) => a.medalIndex - b.medalIndex);
+    res.json({ ok: true, medals: ev.medals, awarded });
+  } catch (e) {
+    console.error('GET /api/admin/events/:id/medals failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.post('/admin/events/:id/medals/award', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').slice(0, 80);
+    const medalIndex = Math.floor(Number((req.body && req.body.medalIndex) ?? -1));
+    const uid = String((req.body && req.body.uid) || '').trim().slice(0, 128);
+    if (!uid) return res.status(400).json({ ok: false, error: 'not_found' });
+
+    const eventSnap = await db.collection('events').doc(id).get();
+    if (!eventSnap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    const ev = publicEvent(id, eventSnap.data());
+    if (medalIndex < 0 || medalIndex >= ev.medals.length)
+      return res.status(400).json({ ok: false, error: 'bad_medal' });
+    const medal = ev.medals[medalIndex];
+
+    // Winner must have joined the event.
+    const joinSnap = await db
+      .collection('eventJoins')
+      .doc(eventJoinId(id, uid))
+      .get();
+    if (!joinSnap.exists) return res.status(400).json({ ok: false, error: 'not_joined' });
+
+    const grantRef = db
+      .collection('players')
+      .doc(uid)
+      .collection('medals')
+      .doc(medalGrantId(id, medalIndex));
+    if ((await grantRef.get()).exists)
+      return res.status(400).json({ ok: false, error: 'already_awarded' });
+
+    const playerSnap = await db.collection('players').doc(uid).get();
+    const displayName =
+      (playerSnap.exists && playerSnap.data().displayName) ||
+      joinSnap.data().displayName ||
+      'Traveler';
+
+    await grantRef.set({
+      eventId: id,
+      eventTitle: ev.title,
+      medalIndex,
+      medalName: medal.name,
+      medalTier: medal.tier,
+      uid,
+      displayName,
+      awardedAt: Date.now(),
+      awardedBy: req.uid,
+    });
+    await safeLog({
+      uid: req.uid,
+      type: 'admin_event_medal_award',
+      details: { eventId: id, medalIndex, medalName: medal.name, toUid: uid, byUid: req.uid },
+    });
+    res.json({ ok: true, medalIndex, uid, medalName: medal.name, medalTier: medal.tier });
+  } catch (e) {
+    console.error('POST /api/admin/events/:id/medals/award failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+router.delete('/admin/events/:id/medals/:medalIndex/:uid', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').slice(0, 80);
+    const medalIndex = Math.floor(Number(req.params.medalIndex ?? -1));
+    const uid = String(req.params.uid || '').trim().slice(0, 128);
+    const grantRef = db
+      .collection('players')
+      .doc(uid)
+      .collection('medals')
+      .doc(medalGrantId(id, medalIndex));
+    const snap = await grantRef.get();
+    if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    await grantRef.delete();
+    await safeLog({
+      uid: req.uid,
+      type: 'admin_event_medal_revoke',
+      details: { eventId: id, medalIndex, fromUid: uid, byUid: req.uid },
+    });
+    res.json({ ok: true, medalIndex, uid });
+  } catch (e) {
+    console.error('DELETE /api/admin/events/:id/medals failed:', e);
     res.status(500).json({ ok: false, error: 'internal' });
   }
 });
