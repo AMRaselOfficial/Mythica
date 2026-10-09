@@ -11,6 +11,7 @@
  * GET  /api/admin/users/:uid
  * POST /api/admin/users/:uid/ban
  * POST /api/admin/users/:uid/unban
+ * POST /api/admin/users/:uid/email      { email }
  * POST /api/admin/users/:uid/inventory/add    { itemId, quantity }
  * POST /api/admin/users/:uid/inventory/remove { itemId, quantity }
  * GET  /api/admin/support[?status=&limit=]
@@ -25,6 +26,7 @@ const { db, USE_FAKE, loadAdmin } = require('../lib/db');
 const { requireAdmin, invalidateBanStatus } = require('../lib/auth');
 const { logActivity } = require('../lib/activity');
 const contentApi = require('../lib/content');
+const { isAllowedEmail } = require('../lib/emailProviders');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -251,6 +253,74 @@ router.post('/admin/users/:uid/unban', async (req, res) => {
     res.json({ ok: true, accountStatus: 'active' });
   } catch (e) {
     console.error('POST /api/admin/users/:uid/unban failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Admin: change a player's sign-in email address.
+ *  Used when a player requests an email change through the support channel
+ *  and the admin has verified the request. Updates both Firebase Auth
+ *  (the sign-in credential) and the player document (kept in sync with the
+ *  auth token email by Firestore rules). The password is unchanged.
+ *  The new address must belong to a verified provider, matching the signup
+ *  gate, and must not already be in use by another account.
+ *  POST /api/admin/users/:uid/email { email } */
+router.post('/admin/users/:uid/email', async (req, res) => {
+  try {
+    const targetUid = req.params.uid;
+    const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ ok: false, error: 'invalid_email' });
+    }
+    if (!isAllowedEmail(email)) {
+      return res.status(400).json({ ok: false, error: 'email_provider_not_allowed' });
+    }
+    const ref = db.collection('players').doc(targetUid);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    const oldEmail = String(snap.data().email || '').toLowerCase();
+    if (oldEmail === email) {
+      return res.status(400).json({ ok: false, error: 'same_email' });
+    }
+    // Duplicate guard: another player doc holding this address means the
+    // address is taken (works in fake/dev mode where Auth SDK is absent).
+    const taken = (await listDocs('players')).some(
+      ({ id, data }) => id !== targetUid && String(data.email || '').toLowerCase() === email
+    );
+    if (taken) return res.status(409).json({ ok: false, error: 'email_in_use' });
+
+    if (!USE_FAKE) {
+      const auth = loadAdmin().auth();
+      try {
+        const existing = await auth.getUserByEmail(email);
+        if (existing.uid !== targetUid) {
+          return res.status(409).json({ ok: false, error: 'email_in_use' });
+        }
+      } catch (e) {
+        if (!e || e.code !== 'auth/user-not-found') throw e;
+      }
+      try {
+        await auth.updateUser(targetUid, { email, emailVerified: false });
+      } catch (e) {
+        if (e && e.code === 'auth/email-already-exists') {
+          return res.status(409).json({ ok: false, error: 'email_in_use' });
+        }
+        if (e && e.code === 'auth/user-not-found') {
+          return res.status(404).json({ ok: false, error: 'not_found' });
+        }
+        throw e;
+      }
+    }
+
+    await ref.update({ email, updatedAt: Date.now() });
+    await safeLog({
+      uid: targetUid,
+      type: 'email_change',
+      details: { targetUid, oldEmail: oldEmail || null, newEmail: email, byUid: req.uid },
+    });
+    res.json({ ok: true, email });
+  } catch (e) {
+    console.error('POST /api/admin/users/:uid/email failed:', e);
     res.status(500).json({ ok: false, error: 'internal' });
   }
 });
