@@ -11,6 +11,7 @@ const { db } = require('../lib/db');
 const { activityEntry } = require('../lib/activity');
 const contentApi = require('../lib/content');
 const { validateList, validatePurchase } = require('../lib/game');
+const { syncBestWeaponPower } = require('../lib/leaderboard');
 
 const router = express.Router();
 
@@ -153,6 +154,16 @@ router.post('/market/purchase', async (req, res) => {
     });
 
     if (out.error) return res.status(400).json({ ok: false, error: out.error });
+    // Best-effort: refresh best weapon power for buyer (a purchase can
+    // grant weapons). The seller's items were escrowed at listing time.
+    if (out.result && out.result.itemId) {
+      const item = contentApi.getItem(out.result.itemId);
+      if (item && item.type === 'weapon') {
+        db.runTransaction(async (tx) => {
+          await syncBestWeaponPower(tx, uid);
+        }).catch(() => {});
+      }
+    }
     return res.json(out.result);
   } catch (e) {
     console.error('POST /api/market/purchase failed:', e);
