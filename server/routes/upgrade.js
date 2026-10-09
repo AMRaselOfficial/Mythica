@@ -13,6 +13,7 @@ const { activityEntry } = require('../lib/activity');
 const contentApi = require('../lib/content');
 const { validateUpgrade, applyXp } = require('../lib/game');
 const { checkAndGrant } = require('../lib/achievementsTx');
+const { syncBestWeaponPower } = require('../lib/leaderboard');
 
 const router = express.Router();
 
@@ -82,6 +83,10 @@ router.post('/upgrade', async (req, res) => {
     if (!out.replay) {
       checkAndGrant(db, USE_FAKE, contentApi.content, (id) => contentApi.getItem(id), applyXp, uid, {
         upgrades: 1,
+      }).catch(() => {});
+      // Best-effort: refresh best weapon power (upgrade raises it).
+      db.runTransaction(async (tx) => {
+        await syncBestWeaponPower(tx, uid);
       }).catch(() => {});
     }
     return res.json(out.result);
