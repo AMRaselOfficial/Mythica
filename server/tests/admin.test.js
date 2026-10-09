@@ -545,3 +545,108 @@ test('admin/users/:uid: full detail shape; 404 for unknown', async () => {
     await close();
   }
 });
+/* --------------------------- admin email change -------------------------- */
+
+async function seedPlayerWithEmail(uid, email) {
+  await seedPlayer(uid);
+  await db.collection('players').doc(uid).update({ email });
+}
+
+test('admin email change: 403 for non-admin token', async () => {
+  const { base, close } = await startServer();
+  try {
+    const res = await fetch(base + '/api/admin/users/u1/email', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-user-u1', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'newaddr@gmail.com' }),
+    });
+    assert.equal(res.status, 403);
+  } finally {
+    await close();
+  }
+});
+
+test('admin email change: rejects invalid email', async () => {
+  const { base, close } = await startServer();
+  try {
+    resetFakeDb();
+    await seedPlayerWithEmail('u1', 'old@gmail.com');
+    const r = await adminPost(base, '/api/admin/users/u1/email', 'boss', { email: 'not-an-email' });
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error, 'invalid_email');
+  } finally {
+    await close();
+  }
+});
+
+test('admin email change: rejects disallowed provider', async () => {
+  const { base, close } = await startServer();
+  try {
+    resetFakeDb();
+    await seedPlayerWithEmail('u1', 'old@gmail.com');
+    const r = await adminPost(base, '/api/admin/users/u1/email', 'boss', { email: 'u1@mailinator.com' });
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error, 'email_provider_not_allowed');
+  } finally {
+    await close();
+  }
+});
+
+test('admin email change: 404 for unknown player', async () => {
+  const { base, close } = await startServer();
+  try {
+    resetFakeDb();
+    const r = await adminPost(base, '/api/admin/users/ghost/email', 'boss', { email: 'newaddr@gmail.com' });
+    assert.equal(r.status, 404);
+    assert.equal(r.json.error, 'not_found');
+  } finally {
+    await close();
+  }
+});
+
+test('admin email change: rejects same email', async () => {
+  const { base, close } = await startServer();
+  try {
+    resetFakeDb();
+    await seedPlayerWithEmail('u1', 'old@gmail.com');
+    const r = await adminPost(base, '/api/admin/users/u1/email', 'boss', { email: 'OLD@gmail.com' });
+    assert.equal(r.status, 400);
+    assert.equal(r.json.error, 'same_email');
+  } finally {
+    await close();
+  }
+});
+
+test('admin email change: 409 when address belongs to another player', async () => {
+  const { base, close } = await startServer();
+  try {
+    resetFakeDb();
+    await seedPlayerWithEmail('u1', 'one@gmail.com');
+    await seedPlayerWithEmail('u2', 'two@yahoo.com');
+    const r = await adminPost(base, '/api/admin/users/u1/email', 'boss', { email: 'two@yahoo.com' });
+    assert.equal(r.status, 409);
+    assert.equal(r.json.error, 'email_in_use');
+  } finally {
+    await close();
+  }
+});
+
+test('admin email change: success updates doc and logs activity', async () => {
+  const { base, close } = await startServer();
+  try {
+    resetFakeDb();
+    await seedPlayerWithEmail('u1', 'old@gmail.com');
+    const r = await adminPost(base, '/api/admin/users/u1/email', 'boss', { email: '  NewAddr@Yahoo.com ' });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json, { ok: true, email: 'newaddr@yahoo.com' });
+    const p = (await db.collection('players').doc('u1').get()).data();
+    assert.equal(p.email, 'newaddr@yahoo.com');
+    const log = findLog('email_change', 'u1');
+    assert.ok(log, 'email_change activity log exists');
+    assert.equal(log.details.oldEmail, 'old@gmail.com');
+    assert.equal(log.details.newEmail, 'newaddr@yahoo.com');
+    assert.equal(log.details.byUid, 'boss');
+  } finally {
+    await close();
+  }
+});
