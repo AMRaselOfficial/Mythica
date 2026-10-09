@@ -96,6 +96,25 @@ function EventCard({ event: ev, onJoin, onClaim, busy }) {
           <strong>Challenge:</strong> {challengeText(ev)}
           <br />
           <strong>Rewards:</strong> {rewardsText(ev.rewards || {})}
+          {(ev.medals || []).length > 0 && (
+            <>
+              <br />
+              <strong>Medals:</strong>{' '}
+              {(ev.medals || []).map((m, i) => (
+                <span key={i} style={{ marginRight: '0.5rem' }}>
+                  <Icon
+                    name="trophy"
+                    size="0.9rem"
+                    style={{
+                      color: m.tier === 'gold' ? '#e8b923' : m.tier === 'silver' ? '#b8c0cc' : '#cd7f32',
+                      verticalAlign: '-2px',
+                    }}
+                  />{' '}
+                  {m.name}
+                </span>
+              ))}
+            </>
+          )}
         </p>
 
         {ev.type === 'minigame' ? (
