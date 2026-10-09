@@ -89,6 +89,12 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow write: if false; // awarded by the game server only
       }
+
+      // Event medals — special profile awards granted by the admin.
+      match /medals/{mid} {
+        allow read: if isOwner(uid);
+        allow write: if false; // awarded by the game server only
+      }
     }
 
     // ---- Inventory: owner read; only the 'favorite' flag is client-writable
