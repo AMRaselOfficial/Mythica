@@ -177,6 +177,7 @@ export const api = {
   events: () => get('/api/events'),
   eventJoin: (id) => post(`/api/events/${encodeURIComponent(id)}/join`, {}),
   eventClaim: (id) => post(`/api/events/${encodeURIComponent(id)}/claim`, {}),
+  leaderboard: () => get('/api/leaderboard'),
   supportCreate: (title, description) => post('/api/support', { title, description }),
   supportMine: () => get('/api/support/mine'),
   supportReply: (ticketId, text) =>
