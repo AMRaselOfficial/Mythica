@@ -15,6 +15,7 @@ const LINKS = [
   { href: '/agora', label: 'Agora' },
   { href: '/veyra', label: 'Veyra' },
   { href: '/events', label: 'Events' },
+  { href: '/leaderboard', label: 'Leaderboard' },
   { href: '/profile', label: 'Profile' },
   { href: '/support', label: 'Support' },
   { href: '/settings', label: 'Settings' },
