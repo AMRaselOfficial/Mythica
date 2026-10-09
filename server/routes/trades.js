@@ -12,6 +12,7 @@ const { activityEntry } = require('../lib/activity');
 const { validateTradeComplete, applyXp } = require('../lib/game');
 const contentApi = require('../lib/content');
 const { checkAndGrant } = require('../lib/achievementsTx');
+const { syncBestWeaponPower } = require('../lib/leaderboard');
 
 const router = express.Router();
 
@@ -117,6 +118,10 @@ router.post('/trades/complete', async (req, res) => {
       for (const party of [out.result.offeredBy, out.result.offeredTo]) {
         checkAndGrant(db, USE_FAKE, contentApi.content, (id) => contentApi.getItem(id), applyXp, party, {
           trades: 1,
+        }).catch(() => {});
+        // Best-effort: refresh best weapon power (trade can move weapons).
+        db.runTransaction(async (tx) => {
+          await syncBestWeaponPower(tx, party);
         }).catch(() => {});
       }
     }
