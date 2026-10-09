@@ -281,3 +281,95 @@ test('player identity: new players get uid; ensurePlayerIdentity backfills old d
     await close();
   }
 });
+
+/* ------------------------------ event medals ------------------------------ */
+
+test('medals: sanitizeMedals caps at 3, defaults tiers and names', async () => {
+  const { sanitizeMedals } = require('../lib/events');
+  assert.deepEqual(sanitizeMedals(undefined), []);
+  assert.deepEqual(sanitizeMedals('nope'), []);
+  const three = sanitizeMedals([
+    { name: 'Top Hunter', tier: 'gold' },
+    { name: '', tier: 'silver' },
+    { tier: 'bronze' },
+    { name: 'Extra', tier: 'gold' },
+  ]);
+  assert.equal(three.length, 3);
+  assert.equal(three[0].name, 'Top Hunter');
+  assert.equal(three[0].tier, 'gold');
+  assert.equal(three[1].name, 'Runner-up'); // blank name -> tier default
+  assert.equal(three[2].name, 'Third Place');
+  // Missing tier falls back to position default.
+  const pos = sanitizeMedals([{ name: 'Mystery' }]);
+  assert.equal(pos[0].tier, 'gold');
+});
+
+test('medals: create event with medals, award, list, revoke', async () => {
+  const { base, close } = await startServer();
+  try {
+    resetFakeDb();
+    const r = await createEvent(base, {
+      medals: [
+        { name: 'Grand Champion', tier: 'gold' },
+        { name: 'Silver Claw', tier: 'silver' },
+      ],
+    });
+    assert.equal(r.status, 200);
+    const eventId = r.json.id;
+    assert.equal(r.json.event.medals.length, 2);
+    assert.equal(r.json.event.medals[0].name, 'Grand Champion');
+
+    // Player joins the event.
+    const uid = 'medalist-1';
+    await seedPlayer(uid, { displayName: 'Medalist' });
+    const jr = await post(base, `/api/events/${eventId}/join`, uid, {});
+    assert.equal(jr.status, 200);
+
+    // Award the gold medal.
+    const ar = await adminReq(base, 'POST', `/api/admin/events/${eventId}/medals/award`,
+      { medalIndex: 0, uid });
+    assert.equal(ar.status, 200);
+    assert.equal(ar.json.medalName, 'Grand Champion');
+
+    // Duplicate award is rejected.
+    const dup = await adminReq(base, 'POST', `/api/admin/events/${eventId}/medals/award`,
+      { medalIndex: 0, uid });
+    assert.equal(dup.status, 400);
+    assert.equal(dup.json.error, 'already_awarded');
+
+    // Bad medal index rejected.
+    const bad = await adminReq(base, 'POST', `/api/admin/events/${eventId}/medals/award`,
+      { medalIndex: 5, uid });
+    assert.equal(bad.status, 400);
+    assert.equal(bad.json.error, 'bad_medal');
+
+    // Non-joiner cannot be awarded.
+    const nj = await adminReq(base, 'POST', `/api/admin/events/${eventId}/medals/award`,
+      { medalIndex: 1, uid: 'stranger-9' });
+    assert.equal(nj.status, 400);
+    assert.equal(nj.json.error, 'not_joined');
+
+    // List shows the award.
+    const lr = await adminReq(base, 'GET', `/api/admin/events/${eventId}/medals`);
+    assert.equal(lr.status, 200);
+    assert.equal(lr.json.awarded.length, 1);
+    assert.equal(lr.json.awarded[0].uid, uid);
+    assert.equal(lr.json.awarded[0].medalTier, 'gold');
+
+    // Grant doc landed in the player's medals subcollection.
+    const gsnap = await db.collection('players').doc(uid)
+      .collection('medals').doc(`${eventId}_0`).get();
+    assert.ok(gsnap.exists);
+    assert.equal(gsnap.data().medalName, 'Grand Champion');
+
+    // Revoke removes it.
+    const rr = await adminReq(base, 'DELETE',
+      `/api/admin/events/${eventId}/medals/0/${uid}`);
+    assert.equal(rr.status, 200);
+    const gsnap2 = await db.collection('players').doc(uid)
+      .collection('medals').doc(`${eventId}_0`).get();
+    assert.ok(!gsnap2.exists);
+  } finally {
+    await close();
+  }
+});
