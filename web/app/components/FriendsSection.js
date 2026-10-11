@@ -23,6 +23,7 @@ export default function FriendsSection() {
   const router = useRouter();
   const [friendships, setFriendships] = useState(null);
   const [profiles, setProfiles] = useState({});
+  const [hiddenUids, setHiddenUids] = useState({}); // banned/unavailable travelers
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState('');
 
@@ -54,17 +55,24 @@ export default function FriendsSection() {
     let cancelled = false;
     (async () => {
       const next = {};
+      const hidden = {};
       await Promise.all(
         missing.map(async (u) => {
           try {
             const p = await getPublicProfile(u);
-            if (p) next[u] = p;
-          } catch {
-            /* leave unresolved */
+            if (p && p.banned === true) hidden[u] = true;
+            else if (p) next[u] = p;
+          } catch (e) {
+            // Permission-denied means the profile is hidden (banned).
+            if (e?.code === 'permission-denied') hidden[u] = true;
+            /* otherwise leave unresolved */
           }
         })
       );
-      if (!cancelled) setProfiles((prev) => ({ ...prev, ...next }));
+      if (!cancelled) {
+        setProfiles((prev) => ({ ...prev, ...next }));
+        setHiddenUids((prev) => ({ ...prev, ...hidden }));
+      }
     })();
     return () => {
       cancelled = true;
@@ -74,7 +82,10 @@ export default function FriendsSection() {
 
   if (!user) return null;
 
-  const rows = friendships || [];
+  const rows = (friendships || []).filter((f) => {
+    const other = otherUid(f.id, user.uid);
+    return !hiddenUids[other];
+  });
   const received = rows.filter(
     (f) => f.status === 'pending' && f.requesterUid !== user.uid
   );
