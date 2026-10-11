@@ -85,6 +85,41 @@ function MarketInner() {
     [active, user]
   );
 
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState(null); // null = browse mode
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+
+  // Debounced server-side search across all active listings.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults(null);
+      setSearching(false);
+      setSearchError('');
+      return undefined;
+    }
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await api.marketSearch(q);
+        setResults(res.listings || []);
+        setSearchError('');
+      } catch (e) {
+        setSearchError(e.message || 'Search failed.');
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const removeListing = useCallback((id) => {
+    setListings((prev) => (prev || []).filter((l) => l.id !== id));
+    setResults((prev) => (prev ? prev.filter((l) => l.id !== id) : prev));
+  }, []);
+
   const buy = async (listing) => {
     setPendingBuy(listing.id);
     setNotice('');
@@ -92,12 +127,12 @@ function MarketInner() {
       const res = await api.marketPurchase(listing.id, newIdempotencyKey());
       sfx.purchase();
       setNotice(<>You bought {res.quantity > 1 ? res.quantity + '× ' : ''}{itemById(res.itemId)?.name || 'item'} for {res.price} <Icon name="petals" />!</>);
-      setListings((prev) => (prev || []).filter((l) => l.id !== listing.id));
+      removeListing(listing.id);
     } catch (err) {
       sfx.error();
       setNotice(err.message || 'Purchase failed.');
       if (err instanceof ApiError && err.code === 'listing_unavailable') {
-        setListings((prev) => (prev || []).filter((l) => l.id !== listing.id));
+        removeListing(listing.id);
       }
     } finally {
       setPendingBuy(null);
@@ -110,7 +145,7 @@ function MarketInner() {
       await api.marketCancel(listing.id);
       sfx.click();
       setNotice('Listing canceled — items returned to your satchel.');
-      setListings((prev) => (prev || []).filter((l) => l.id !== listing.id));
+      removeListing(listing.id);
     } catch (e) {
       sfx.error();
       setNotice(e.message || 'Could not cancel the listing.');
@@ -148,28 +183,88 @@ function MarketInner() {
       <h2 className="serif" style={{ marginTop: '2rem' }}>
         Browse Listings
       </h2>
-      {listings === null && loading && <LoadingBlock label="Browsing the stalls" />}
-      {others.length === 0 && listings !== null && !loading && (
-        <EmptyState icon="marketplace" title="The stalls are empty" body="No one is selling right now. Check back after the next hunt." />
-      )}
-      <div className="row-list">
-        {others.map((l) => (
-          <ListingRow
-            key={l.id}
-            listing={l}
-            buying={pendingBuy === l.id}
-            canAfford={(player?.petals ?? 0) >= l.price}
-            onBuy={() => buy(l)}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <input
+            className="input"
+            type="search"
+            placeholder="Search items by name…"
+            aria-label="Search marketplace listings"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{ width: '100%', paddingRight: query ? '2.4rem' : undefined }}
           />
-        ))}
+          {query && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              aria-label="Clear search"
+              onClick={() => setQuery('')}
+              style={{
+                position: 'absolute',
+                right: '0.3rem',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                padding: '0.2rem 0.5rem',
+              }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
-      {hasMore && listings !== null && (
-        <div className="pagination">
-          <button className="btn" onClick={() => loadPage(false)} disabled={loading}>
-            {loading ? 'Loading…' : 'Show more'}
-          </button>
-        </div>
+      {results !== null ? (
+        <>
+          {searching && <LoadingBlock label="Searching the stalls" />}
+          {!searching && searchError && <ErrorNotice message={searchError} />}
+          {!searching && !searchError && results.length === 0 && (
+            <EmptyState
+              icon="search"
+              title="No matches"
+              body={`Nothing on sale matches "${query.trim()}" right now.`}
+            />
+          )}
+          {!searching && !searchError && results.length > 0 && (
+            <div className="row-list">
+              {results.map((l) => (
+                <ListingRow
+                  key={l.id}
+                  listing={l}
+                  buying={pendingBuy === l.id}
+                  canAfford={(player?.petals ?? 0) >= l.price}
+                  onBuy={() => buy(l)}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {listings === null && loading && <LoadingBlock label="Browsing the stalls" />}
+          {others.length === 0 && listings !== null && !loading && (
+            <EmptyState icon="marketplace" title="The stalls are empty" body="No one is selling right now. Check back after the next hunt." />
+          )}
+          <div className="row-list">
+            {others.map((l) => (
+              <ListingRow
+                key={l.id}
+                listing={l}
+                buying={pendingBuy === l.id}
+                canAfford={(player?.petals ?? 0) >= l.price}
+                onBuy={() => buy(l)}
+              />
+            ))}
+          </div>
+
+          {hasMore && listings !== null && (
+            <div className="pagination">
+              <button className="btn" onClick={() => loadPage(false)} disabled={loading}>
+                {loading ? 'Loading…' : 'Show more'}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
