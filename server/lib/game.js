@@ -118,6 +118,7 @@ function validateList({ item, quantity, price, ownedQty }) {
 /** Market purchase validation. Returns an error code or null. */
 function validatePurchase({ listing, buyerUid, buyerPetals }) {
   if (!listing || listing.status !== 'active') return 'listing_unavailable';
+  if (listing.sellerBanned === true) return 'listing_unavailable';
   if (listing.sellerUid === buyerUid) return 'own_listing';
   if ((buyerPetals ?? 0) < listing.price) return 'insufficient_petals';
   return null;
