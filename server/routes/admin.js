@@ -216,6 +216,41 @@ async function revokeSessionsBestEffort(uid) {
   }
 }
 
+/** Best-effort Auth disable/enable: skipped silently in fake/dev mode. */
+async function setAuthDisabledBestEffort(uid, disabled) {
+  if (USE_FAKE) return;
+  try {
+    await loadAdmin().auth().updateUser(uid, { disabled });
+  } catch (e) {
+    console.error('setAuthDisabled failed (best effort):', e && e.message);
+  }
+}
+
+/** Flag/unflag a player's active marketplace listings as hidden by ban.
+ *  Only touches listings that are currently active; sold/cancelled listings
+ *  are left alone so an unban restores exactly what was visible. */
+async function setListingsBanHidden(uid, hidden) {
+  let refs;
+  if (USE_FAKE) {
+    refs = db
+      ._listAll('marketplace')
+      .filter(({ data }) => {
+        const d = data();
+        return d.sellerUid === uid && d.status === 'active';
+      })
+      .map(({ id }) => db.collection('marketplace').doc(id));
+  } else {
+    const snap = await db
+      .collection('marketplace')
+      .where('sellerUid', '==', uid)
+      .where('status', '==', 'active')
+      .get();
+    refs = snap.docs.map((d) => d.ref);
+  }
+  await Promise.all(refs.map((r) => r.update({ sellerBanned: hidden })));
+  return refs.length;
+}
+
 async function safeLog(entry) {
   try {
     await logActivity(db, entry);
@@ -228,13 +263,20 @@ async function safeLog(entry) {
 router.post('/admin/users/:uid/ban', async (req, res) => {
   try {
     const targetUid = req.params.uid;
+    const reason = String(req.body?.reason || '').slice(0, 500);
     const ref = db.collection('players').doc(targetUid);
     const snap = await ref.get();
     if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
-    await ref.update({ accountStatus: 'banned', updatedAt: Date.now() });
+    const now = Date.now();
+    await ref.update({ accountStatus: 'banned', bannedAt: now, banReason: reason, updatedAt: now });
+    // Hide from leaderboard, profile views, traveler search.
+    await db.collection('publicProfiles').doc(targetUid).set({ banned: true }, { merge: true });
+    // Hide active marketplace listings (restored on unban).
+    const hiddenListings = await setListingsBanHidden(targetUid, true);
+    await setAuthDisabledBestEffort(targetUid, true);
     await revokeSessionsBestEffort(targetUid);
     invalidateBanStatus(targetUid);
-    await safeLog({ uid: targetUid, type: 'ban', details: { targetUid, byUid: req.uid } });
+    await safeLog({ uid: targetUid, type: 'ban', details: { targetUid, byUid: req.uid, reason, hiddenListings } });
     res.json({ ok: true, accountStatus: 'banned' });
   } catch (e) {
     console.error('POST /api/admin/users/:uid/ban failed:', e);
@@ -248,9 +290,13 @@ router.post('/admin/users/:uid/unban', async (req, res) => {
     const ref = db.collection('players').doc(targetUid);
     const snap = await ref.get();
     if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
-    await ref.update({ accountStatus: 'active', updatedAt: Date.now() });
+    await ref.update({ accountStatus: 'active', bannedAt: null, banReason: '', updatedAt: Date.now() });
+    // Restore visibility everywhere.
+    await db.collection('publicProfiles').doc(targetUid).set({ banned: false }, { merge: true });
+    const restoredListings = await setListingsBanHidden(targetUid, false);
+    await setAuthDisabledBestEffort(targetUid, false);
     invalidateBanStatus(targetUid);
-    await safeLog({ uid: targetUid, type: 'unban', details: { targetUid, byUid: req.uid } });
+    await safeLog({ uid: targetUid, type: 'unban', details: { targetUid, byUid: req.uid, restoredListings } });
     res.json({ ok: true, accountStatus: 'active' });
   } catch (e) {
     console.error('POST /api/admin/users/:uid/unban failed:', e);
