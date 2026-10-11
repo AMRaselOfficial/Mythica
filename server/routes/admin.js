@@ -107,14 +107,15 @@ router.get('/admin/stats', async (req, res) => {
     const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     let huntsToday = 0;
     let tradesToday = 0;
-    let marketplaceVolumeToday = 0;
     for (const { data } of await listDocs('activityLogs')) {
       if (toMillis(data.createdAt) < todayStart) continue;
       if (data.type === 'hunt') huntsToday += 1;
       else if (data.type === 'trade_completed') tradesToday += 1;
-      else if (data.type === 'purchase') {
-        marketplaceVolumeToday += Number(data.details && data.details.price) || 0;
-      }
+    }
+    // Marketplace value = total asking price of all active listings.
+    let marketplaceValue = 0;
+    for (const { data } of await listDocs('marketplace')) {
+      if (data.status === 'active') marketplaceValue += Number(data.price) || 0;
     }
     const players = await listDocs('players');
     res.json({
@@ -122,7 +123,7 @@ router.get('/admin/stats', async (req, res) => {
       totalUsers: players.length,
       huntsToday,
       tradesToday,
-      marketplaceVolumeToday,
+      marketplaceValue,
     });
   } catch (e) {
     console.error('GET /api/admin/stats failed:', e);
