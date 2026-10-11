@@ -113,7 +113,7 @@ function MarketInner() {
       }
     }, 400);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [searchText]);
 
   const removeListing = useCallback((id) => {
     setListings((prev) => (prev || []).filter((l) => l.id !== id));
