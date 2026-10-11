@@ -30,6 +30,7 @@ export default function TradesPage() {
 function TradesInner() {
   const { user } = useAuth();
   const [trades, setTrades] = useState(null);
+  const [hiddenUids, setHiddenUids] = useState({}); // banned counterparties
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busyId, setBusyId] = useState(null);
@@ -75,13 +76,56 @@ function TradesInner() {
   }, [user]);
 
   const incoming = useMemo(
-    () => (trades || []).filter((t) => t.offeredTo === user?.uid),
-    [trades, user]
+    () =>
+      (trades || []).filter((t) => {
+        if (t.offeredTo !== user?.uid) return false;
+        return !hiddenUids[t.offeredBy];
+      }),
+    [trades, user, hiddenUids]
   );
   const outgoing = useMemo(
-    () => (trades || []).filter((t) => t.offeredBy === user?.uid),
-    [trades, user]
+    () =>
+      (trades || []).filter((t) => {
+        if (t.offeredBy !== user?.uid) return false;
+        return !hiddenUids[t.offeredTo];
+      }),
+    [trades, user, hiddenUids]
   );
+
+  // Hide trades with banned counterparties (their profiles fail to load).
+  useEffect(() => {
+    if (!user || !trades) return undefined;
+    const others = [
+      ...new Set(
+        trades
+          .map((t) => (t.offeredBy === user.uid ? t.offeredTo : t.offeredBy))
+          .filter((u) => u && u !== user.uid && !hiddenUids[u])
+      ),
+    ];
+    if (!others.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      const { getPublicProfile } = await import('../../lib/social.js');
+      const hidden = {};
+      await Promise.all(
+        others.map(async (u) => {
+          try {
+            const p = await getPublicProfile(u);
+            if (!p || p.banned === true) hidden[u] = true;
+          } catch (e) {
+            if (e?.code === 'permission-denied') hidden[u] = true;
+          }
+        })
+      );
+      if (!cancelled && Object.keys(hidden).length) {
+        setHiddenUids((prev) => ({ ...prev, ...hidden }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trades, user]);
 
   const act = async (trade, fn, okMsg) => {
     setBusyId(trade.id);
