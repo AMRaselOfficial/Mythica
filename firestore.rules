@@ -177,8 +177,10 @@ service cloud.firestore {
     }
 
     // ---- Social: public traveler profiles (base info only, server-maintained)
+    // Banned travelers are hidden: their docs fail the read rule, so they
+    // vanish from friend lists and profile lookups automatically.
     match /publicProfiles/{uid} {
-      allow read: if signedIn();
+      allow read: if signedIn() && resource.data.get('banned', false) == false;
       allow write: if false; // maintained by the game server only
     }
 
