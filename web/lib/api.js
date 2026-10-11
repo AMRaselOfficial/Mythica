@@ -166,6 +166,7 @@ export const api = {
   marketPurchase: (listingId, idempotencyKey) =>
     post('/api/market/purchase', { listingId, idempotencyKey }),
   marketCancel: (listingId) => post('/api/market/cancel', { listingId }),
+  marketearch: (q) => get(`/api/market/search?q=${encodeomponent(q)}`),
   tradesComplete: (tradeId, idempotencyKey) =>
     post('/api/trades/complete', { tradeId, idempotencyKey }),
   upgrade: (itemId, idempotencyKey) => post('/api/upgrade', { itemId, idempotencyKey }),
