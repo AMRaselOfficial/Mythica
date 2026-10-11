@@ -73,7 +73,8 @@ function MarketInner() {
   }, []);
 
   const active = useMemo(
-    () => (listings || []).filter((l) => l.status === 'active'),
+    // Banned sellers' listings are flagged sellerBanned and hidden here.
+    () => (listings || []).filter((l) => l.status === 'active' && l.sellerBanned !== true),
     [listings]
   );
   const mine = useMemo(
