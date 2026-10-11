@@ -20,6 +20,7 @@ const {
   seedInv,
   getPlayer,
   getInvQty,
+  authHeaders,
 } = require('./helpers');
 
 function adminHeaders(uid) {
@@ -125,7 +126,7 @@ test('ban flow: banned account gets 403 on gameplay; unban restores it', async (
 
     const unbanLog = findLog('unban', uid);
     assert.ok(unbanLog, 'unban writes an activity log');
-    assert.deepEqual(unbanLog.details, { targetUid: uid, byUid: 'boss' });
+    assert.deepEqual(unbanLog.details, { targetUid: uid, byUid: 'boss', restoredListings: 0 });
   } finally {
     await close();
   }
@@ -153,7 +154,7 @@ test('ban endpoint: sets banned, blocks gameplay, logs; 404 for unknown uid', as
 
     const banLog = findLog('ban', uid);
     assert.ok(banLog, 'ban writes an activity log');
-    assert.deepEqual(banLog.details, { targetUid: uid, byUid: 'boss' });
+    assert.deepEqual(banLog.details, { targetUid: uid, byUid: 'boss', reason: '', hiddenListings: 0 });
   } finally {
     await close();
   }
@@ -379,7 +380,7 @@ test('market/cancel: cancels own listing, restores inventory, logs', async () =>
 
 /* --------------------------------- stats --------------------------------- */
 
-test('admin/stats: counts today from activityLogs, totals users', async () => {
+test('admin/stats: counts today from activityLogs, totals users, values active listings', async () => {
   resetFakeDb();
   const { base, close } = await startServer();
   try {
@@ -392,10 +393,15 @@ test('admin/stats: counts today from activityLogs, totals users', async () => {
     const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
     const col = db.collection('activityLogs');
     await col.doc().set({ uid: 'stat-b', type: 'purchase', details: { price: 75 }, createdAt: Date.now() });
-    await col.doc().set({ uid: 'stat-b', type: 'purchase', details: { price: 25 }, createdAt: Date.now() });
     await col.doc().set({ uid: 'stat-a', type: 'trade_completed', details: {}, createdAt: Date.now() });
     // Yesterday's hunt must not count.
     await col.doc().set({ uid: 'stat-a', type: 'hunt', details: {}, createdAt: todayStart - 1000 });
+
+    // Active listings count toward marketplace value; sold ones do not.
+    const mk = db.collection('marketplace');
+    await mk.doc().set({ sellerUid: 'stat-b', itemId: 'moss-wisp', quantity: 1, price: 75, status: 'active', createdAt: Date.now() });
+    await mk.doc().set({ sellerUid: 'stat-b', itemId: 'ember-fox', quantity: 2, price: 25, status: 'active', createdAt: Date.now() });
+    await mk.doc().set({ sellerUid: 'stat-b', itemId: 'moss-wisp', quantity: 1, price: 999, status: 'sold', createdAt: Date.now() });
 
     const { status, json } = await adminGet(base, '/api/admin/stats', 'boss');
     assert.equal(status, 200);
@@ -403,7 +409,7 @@ test('admin/stats: counts today from activityLogs, totals users', async () => {
     assert.equal(json.totalUsers, 2);
     assert.equal(json.huntsToday, 1);
     assert.equal(json.tradesToday, 1);
-    assert.equal(json.marketplaceVolumeToday, 100);
+    assert.equal(json.marketplaceValue, 100);
   } finally {
     await close();
   }
@@ -646,6 +652,118 @@ test('admin email change: success updates doc and logs activity', async () => {
     assert.equal(log.details.oldEmail, 'old@gmail.com');
     assert.equal(log.details.newEmail, 'newaddr@yahoo.com');
     assert.equal(log.details.byUid, 'boss');
+  } finally {
+    await close();
+  }
+});
+
+/* ------------------------- ban: full visibility ------------------------- */
+
+test('ban hides listings, profile, leaderboard; unban restores everything', async () => {
+  resetFakeDb();
+  const { base, close } = await startServer();
+  try {
+    const uid = 'banfull';
+    const other = 'banobserver';
+    await seedPlayer(uid);
+    await db.collection('players').doc(uid).update({ displayName: 'BanMe', playerCode: 'BAN123' });
+    await seedPlayer(other);
+    await db.collection('players').doc(other).update({ displayName: 'Watcher' });
+    // Public profile with leaderboard power.
+    await db.collection('publicProfiles').doc(uid).set({
+      displayName: 'BanMe', level: 10, bestWeaponPower: 999999,
+    });
+    await db.collection('publicProfiles').doc(other).set({
+      displayName: 'Watcher', level: 5, bestWeaponPower: 100,
+    });
+    // An active marketplace listing.
+    const listingRef = db.collection('marketplace').doc('ban-listing-1');
+    await listingRef.set({
+      sellerUid: uid, itemId: 'ember-fox', quantity: 1, price: 100,
+      status: 'active', createdAt: Date.now(),
+    });
+
+    // Sanity: visible before ban.
+    let lb = await get(base, '/api/leaderboard', authHeaders(other));
+    assert.ok(lb.json.global.some((e) => e.displayName === 'BanMe'));
+
+    // Ban with a reason.
+    const ban = await adminPost(base, `/api/admin/users/${uid}/ban`, 'boss', { reason: 'testing' });
+    assert.equal(ban.status, 200);
+    const p = await getPlayer(uid);
+    assert.equal(p.accountStatus, 'banned');
+    assert.equal(p.banReason, 'testing');
+    assert.ok(p.bannedAt);
+
+    // publicProfiles flagged.
+    const pp = await db.collection('publicProfiles').doc(uid).get();
+    assert.equal(pp.data().banned, true);
+
+    // Listing hidden via sellerBanned flag (still active underneath).
+    const l = await listingRef.get();
+    assert.equal(l.data().status, 'active');
+    assert.equal(l.data().sellerBanned, true);
+
+    // Leaderboard no longer shows the banned user.
+    lb = await get(base, '/api/leaderboard', authHeaders(other));
+    assert.ok(!lb.json.global.some((e) => e.displayName === 'BanMe'));
+    assert.ok(lb.json.global.some((e) => e.displayName === 'Watcher'));
+
+    // Traveler search by code finds nothing.
+    const code = p.playerCode;
+    const byCode = await get(base, `/api/players/by-code/${code}`, authHeaders(other));
+    assert.equal(byCode.status, 404);
+
+    // Unban restores everything.
+    const unban = await adminPost(base, `/api/admin/users/${uid}/unban`, 'boss', {});
+    assert.equal(unban.status, 200);
+    assert.equal((await getPlayer(uid)).accountStatus, 'active');
+    assert.equal((await db.collection('publicProfiles').doc(uid).get()).data().banned, false);
+    assert.equal((await listingRef.get()).data().sellerBanned, false);
+
+    lb = await get(base, '/api/leaderboard', authHeaders(other));
+    assert.ok(lb.json.global.some((e) => e.displayName === 'BanMe'));
+    const byCode2 = await get(base, `/api/players/by-code/${code}`, authHeaders(other));
+    assert.equal(byCode2.status, 200);
+  } finally {
+    await close();
+  }
+});
+
+test('market search and purchase exclude banned sellers listings', async () => {
+  resetFakeDb();
+  const { base, close } = await startServer();
+  try {
+    const seller = 'banseller';
+    const buyer = 'banbuyer';
+    await seedPlayer(seller, { displayName: 'BadSeller' });
+    await seedPlayer(buyer, { displayName: 'Buyer', petals: 10000 });
+    await db.collection('marketplace').doc('ban-search-1').set({
+      sellerUid: seller, itemId: 'ember-fox', quantity: 1, price: 50,
+      status: 'active', createdAt: Date.now(),
+    });
+
+    // Visible before ban.
+    let s = await get(base, '/api/market/search?q=ember', authHeaders(buyer));
+    assert.ok(s.json.listings.some((l) => l.id === 'ban-search-1'));
+
+    await adminPost(base, `/api/admin/users/${seller}/ban`, 'boss', {});
+
+    // Hidden from search after ban.
+    s = await get(base, '/api/market/search?q=ember', authHeaders(buyer));
+    assert.ok(!s.json.listings.some((l) => l.id === 'ban-search-1'));
+
+    // Purchase blocked after ban.
+    const buy = await post(base, '/api/market/purchase', buyer, {
+      listingId: 'ban-search-1', idempotencyKey: 'ban-buy-1',
+    });
+    assert.equal(buy.json.ok, false);
+    assert.equal(buy.json.error, 'listing_unavailable');
+
+    // Unban restores search visibility.
+    await adminPost(base, `/api/admin/users/${seller}/unban`, 'boss', {});
+    s = await get(base, '/api/market/search?q=ember', authHeaders(buyer));
+    assert.ok(s.json.listings.some((l) => l.id === 'ban-search-1'));
   } finally {
     await close();
   }
