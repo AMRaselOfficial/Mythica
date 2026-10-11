@@ -36,10 +36,20 @@ export default function TravelerModal({ uid, onClose }) {
           user ? getFriendshipStatus(user.uid, uid) : Promise.resolve('none'),
         ]);
         if (cancelled) return;
-        setProfile(p);
-        setStatus(s);
+        // Banned travelers are hidden from profile views.
+        if (p && p.banned === true) {
+          setProfile(null);
+          setStatus('unavailable');
+        } else {
+          setProfile(p);
+          setStatus(s);
+        }
       } catch (e) {
-        if (!cancelled) setError(`Could not load this traveler (${e?.message || e}).`);
+        // Permission-denied here means the profile is hidden (banned).
+        if (!cancelled) {
+          if (e?.code === 'permission-denied') setStatus('unavailable');
+          else setError(`Could not load this traveler (${e?.message || e}).`);
+        }
       }
     })();
     return () => {
@@ -143,7 +153,13 @@ export default function TravelerModal({ uid, onClose }) {
 
         {error && <p className="error" style={{ marginTop: '0.75rem' }}>{error}</p>}
 
-        {!isSelf && (
+        {status === 'unavailable' && (
+          <p className="muted" style={{ marginTop: '0.75rem' }}>
+            This traveler is unavailable.
+          </p>
+        )}
+
+        {!isSelf && status !== 'unavailable' && (
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
             {status === 'loading' && <p className="muted">Checking…</p>}
             {status === 'none' && (
