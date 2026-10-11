@@ -85,14 +85,14 @@ function MarketInner() {
     [active, user]
   );
 
-  const [query, setQuery] = useState('');
+  const [searchText, setSearchText] = useState('');
   const [results, setResults] = useState(null); // null = browse mode
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
 
   // Debounced server-side search across all active listings.
   useEffect(() => {
-    const q = query.trim();
+    const q = searchText.trim();
     if (!q) {
       setResults(null);
       setSearching(false);
@@ -190,16 +190,16 @@ function MarketInner() {
             type="search"
             placeholder="Search items by name…"
             aria-label="Search marketplace listings"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{ width: '100%', paddingRight: query ? '2.4rem' : undefined }}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            style={{ width: '100%', paddingRight: searchText ? '2.4rem' : undefined }}
           />
-          {query && (
+          {searchText && (
             <button
               type="button"
               className="btn btn-ghost btn-sm"
               aria-label="Clear search"
-              onClick={() => setQuery('')}
+              onClick={() => setSearchText('')}
               style={{
                 position: 'absolute',
                 right: '0.3rem',
@@ -222,7 +222,7 @@ function MarketInner() {
             <EmptyState
               icon="search"
               title="No matches"
-              body={`Nothing on sale matches "${query.trim()}" right now.`}
+              body={`Nothing on sale matches "${searchText.trim()}" right now.`}
             />
           )}
           {!searching && !searchError && results.length > 0 && (
