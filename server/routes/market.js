@@ -7,7 +7,7 @@
  * replaying the same key returns the stored result without double-spend.
  */
 const express = require('express');
-const { db } = require('../lib/db');
+const { db, USE_FAKE } = require('../lib/db');
 const { activityEntry } = require('../lib/activity');
 const contentApi = require('../lib/content');
 const { validateList, validatePurchase } = require('../lib/game');
@@ -224,6 +224,54 @@ router.post('/market/cancel', async (req, res) => {
     return res.json(out);
   } catch (e) {
     console.error('POST /api/market/cancel failed:', e);
+    return res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/**
+ * GET /api/market/search?q=...
+ * Search ACTIVE listings by item name (case-insensitive substring).
+ * Scans the newest listings and filters in memory to avoid a composite index.
+ * The caller's own listings are excluded since they cannot be bought.
+ */
+router.get('/market/search', async (req, res) => {
+  const uid = req.uid;
+  const q = String(req.query.q || '').trim().toLowerCase();
+  if (!q || q.length > 40) {
+    return res.status(400).json({ ok: false, error: 'bad_request' });
+  }
+  try {
+    // Newest first; filter in memory to avoid a composite index.
+    // Fake test DB has no query API, so scan the in-memory store there.
+    let docs;
+    if (USE_FAKE) {
+      docs = db
+        ._listAll('marketplace')
+        .map(({ id, data }) => ({ id, ...data() }))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        .slice(0, 500);
+    } else {
+      const snap = await db.collection('marketplace').orderBy('createdAt', 'desc').limit(500).get();
+      docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+    const listings = [];
+    for (const l of docs) {
+      if (!l || l.status !== 'active' || l.sellerUid === uid) continue;
+      const item = contentApi.getItem(l.itemId);
+      const name = (item && item.name ? item.name : String(l.itemId || '')).toLowerCase();
+      if (!name.includes(q)) continue;
+      listings.push({
+        id: l.id,
+        sellerUid: l.sellerUid,
+        itemId: l.itemId,
+        quantity: l.quantity,
+        price: l.price,
+        createdAt: l.createdAt,
+      });
+    }
+    return res.json({ ok: true, listings });
+  } catch (e) {
+    console.error('GET /api/market/search failed:', e);
     return res.status(500).json({ ok: false, error: 'internal' });
   }
 });
