@@ -54,7 +54,7 @@ async function listProfilesByPower() {
     const rows = db
       ._listAll('publicProfiles')
       .map(({ id, data }) => ({ id, data: data() }))
-      .filter((r) => (r.data.bestWeaponPower || 0) > 0);
+      .filter((r) => (r.data.bestWeaponPower || 0) > 0 && r.data.banned !== true);
     rows.sort((a, b) => (b.data.bestWeaponPower || 0) - (a.data.bestWeaponPower || 0));
     return rows;
   }
@@ -65,7 +65,7 @@ async function listProfilesByPower() {
     .get();
   return snap.docs
     .map((d) => ({ id: d.id, data: d.data() }))
-    .filter((r) => (r.data.bestWeaponPower || 0) > 0);
+    .filter((r) => (r.data.bestWeaponPower || 0) > 0 && r.data.banned !== true);
 }
 
 /** Public shape of a leaderboard entry. */
