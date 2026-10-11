@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 require('./helpers');
-const { db, resetFakeDb, startServer, post, seedPlayer, seedInv, getInvQty, getPlayer } = require('./helpers');
+const { db, resetFakeDb, startServer, post, get, authHeaders, seedPlayer, seedInv, getInvQty, getPlayer } = require('./helpers');
 
 test('market: list validates inputs', async () => {
   resetFakeDb();
@@ -134,6 +134,74 @@ test('market: purchase rejects own listing, insufficient petals, missing fields'
     // listing still active after the rejections
     const l = await db.collection('marketplace').doc(listingId).get();
     assert.equal(l.data().status, 'active');
+  } finally {
+    await close();
+  }
+});
+
+test('market: search finds active listings by item name, case-insensitive', async () => {
+  resetFakeDb();
+  const { base, close } = await startServer();
+  try {
+    const seller = 'mk-search-seller';
+    const buyer = 'mk-search-buyer';
+    await seedPlayer(seller, 20);
+    await seedPlayer(buyer, 500);
+    await seedInv(seller, 'moss-wisp', 3);
+    await seedInv(seller, 'ember-fox', 2);
+
+    let r = await post(base, '/api/market/list', seller, { itemId: 'moss-wisp', quantity: 1, price: 50 });
+    assert.equal(r.status, 200);
+    const mossId = r.json.listingId;
+    r = await post(base, '/api/market/list', seller, { itemId: 'ember-fox', quantity: 2, price: 300 });
+    assert.equal(r.status, 200);
+
+    // substring match, case-insensitive
+    r = await get(base, '/api/market/search?q=moss', authHeaders(buyer));
+    assert.equal(r.status, 200);
+    assert.equal(r.json.ok, true);
+    assert.equal(r.json.listings.length, 1);
+    assert.equal(r.json.listings[0].id, mossId);
+    assert.equal(r.json.listings[0].itemId, 'moss-wisp');
+
+    r = await get(base, '/api/market/search?q=FOX', authHeaders(buyer));
+    assert.equal(r.json.listings.length, 1);
+    assert.equal(r.json.listings[0].itemId, 'ember-fox');
+
+    // no match
+    r = await get(base, '/api/market/search?q=dragon', authHeaders(buyer));
+    assert.equal(r.json.listings.length, 0);
+
+    // own listings are excluded (cannot be bought)
+    r = await get(base, '/api/market/search?q=moss', authHeaders(seller));
+    assert.equal(r.json.listings.length, 0);
+
+    // empty query -> 400
+    r = await get(base, '/api/market/search?q=%20%20', authHeaders(buyer));
+    assert.equal(r.status, 400);
+  } finally {
+    await close();
+  }
+});
+
+test('market: search skips sold listings', async () => {
+  resetFakeDb();
+  const { base, close } = await startServer();
+  try {
+    const seller = 'mk-sold-seller';
+    const buyer = 'mk-sold-buyer';
+    await seedPlayer(seller, 20);
+    await seedPlayer(buyer, 500);
+    await seedInv(seller, 'moss-wisp', 2);
+
+    let r = await post(base, '/api/market/list', seller, { itemId: 'moss-wisp', quantity: 1, price: 10 });
+    const listingId = r.json.listingId;
+    r = await post(base, '/api/market/purchase', buyer, { listingId, idempotencyKey: 'k-sold-search' });
+    assert.equal(r.status, 200);
+
+    r = await get(base, '/api/market/search?q=moss', authHeaders(buyer));
+    assert.equal(r.status, 200);
+    assert.equal(r.json.listings.length, 0);
   } finally {
     await close();
   }
