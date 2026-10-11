@@ -52,6 +52,7 @@ router.get('/players/by-code/:code', async (req, res) => {
     const snap = await db.collection('players').doc(uid).get();
     if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
     const p = snap.data();
+    if (p.accountStatus === 'banned') return res.status(404).json({ ok: false, error: 'not_found' });
     res.json({
       ok: true,
       uid, // needed for trade creation; only visible to authenticated users
