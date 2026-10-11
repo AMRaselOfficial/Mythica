@@ -256,7 +256,7 @@ router.get('/market/search', async (req, res) => {
     }
     const listings = [];
     for (const l of docs) {
-      if (!l || l.status !== 'active' || l.sellerUid === uid) continue;
+      if (!l || l.status !== 'active' || l.sellerUid === uid || l.sellerBanned === true) continue;
       const item = contentApi.getItem(l.itemId);
       const name = (item && item.name ? item.name : String(l.itemId || '')).toLowerCase();
       if (!name.includes(q)) continue;
