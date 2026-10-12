@@ -5,6 +5,7 @@ import { asset, link } from '../../lib/paths.js';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { sfx, unlockAudio } from '../../lib/audio.js';
 import { Icon } from './icons.js';
+import NotificationBell from './NotificationBell.js';
 
 const LINKS = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -111,6 +112,7 @@ export default function Nav() {
           </div>
         )}
         <div className="nav-user">
+          {user && <NotificationBell uid={user.uid} />}
           {user && player && <span className="petals"><Icon name="petals" /> {player.petals ?? 0}</span>}
           {user ? (
             <button className="btn btn-ghost btn-sm nav-signout-desktop" onClick={handleLogout}>
