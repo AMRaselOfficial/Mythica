@@ -17,6 +17,7 @@ import Protected from '../components/Protected.js';
 import { LoadingBlock, ErrorNotice, EmptyState } from '../components/ui.js';
 import { Icon } from '../components/icons.js';
 import { useAuth } from '../../contexts/AuthContext.js';
+import { api } from '../../lib/api.js';
 import { getFirebase } from '../../lib/firebase.js';
 import { sfx } from '../../lib/audio.js';
 import {
@@ -225,8 +226,15 @@ function VeyraInner() {
     if (sending || !activeId) return;
     setSending(true);
     setError('');
+    const sentText = text;
     try {
-      await sendPrivateMessage(activeId, user.uid, text);
+      await sendPrivateMessage(activeId, user.uid, sentText);
+      // Device push for the recipient (best effort) — message stays in Veyra only.
+      const activeChat = (chats || []).find((c) => c.id === activeId);
+      const toUid = activeChat ? otherUid(activeChat.id, user?.uid) : null;
+      if (toUid) {
+        try { await api.notifVeyraPush(activeId, toUid, sentText); } catch { /* ignore */ }
+      }
       sfx.click();
       setText('');
     } catch (err) {
