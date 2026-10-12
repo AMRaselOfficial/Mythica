@@ -48,6 +48,14 @@ async function ensurePlayerDoc(db, user, displayName) {
 }
 
 async function ensurePlayerDocInner(db, user, displayName) {
+  // Right after signup/login, Firestore may not see the auth token yet,
+  // causing a spurious "Missing or insufficient permissions" on the first
+  // write. Force a token refresh so request.auth is populated in the rules.
+  try {
+    await user.getIdToken(true);
+  } catch {
+    /* ignore; the Firestore call will surface a real error if auth is broken */
+  }
   const ref = doc(db, 'players', user.uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
