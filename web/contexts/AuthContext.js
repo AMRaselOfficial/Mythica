@@ -26,7 +26,28 @@ const PLAYER_DEFAULTS = {
   accountStatus: 'active',
 };
 
+// Prevents concurrent ensurePlayerDoc calls for the same user (signup/login
+// both trigger it directly AND via onAuthStateChanged). Without this, two
+// calls race: both see "doc missing", both setDoc, and the loser gets a
+// Firestore "Missing or insufficient permissions" because its write lands as
+// an update with fields the rules don't allow clients to change.
+const pendingEnsures = new Map();
+
 async function ensurePlayerDoc(db, user, displayName) {
+  const uid = user.uid;
+  if (pendingEnsures.has(uid)) return pendingEnsures.get(uid);
+  const run = (async () => {
+    await ensurePlayerDocInner(db, user, displayName);
+  })();
+  pendingEnsures.set(uid, run);
+  try {
+    return await run;
+  } finally {
+    pendingEnsures.delete(uid);
+  }
+}
+
+async function ensurePlayerDocInner(db, user, displayName) {
   const ref = doc(db, 'players', user.uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
