@@ -176,6 +176,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- Petal withdrawals: created via POST /api/withdraw, managed via
+    // /api/admin/withdrawals*. Petals are deducted/refunded transactionally
+    // by the server. No direct client access.
+    match /withdrawals/{withdrawalId} {
+      allow read, write: if false;
+    }
+
     // ---- Social: public traveler profiles (base info only, server-maintained)
     // Banned travelers are hidden: their docs fail the read rule, so they
     // vanish from friend lists and profile lookups automatically.
