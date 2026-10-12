@@ -110,6 +110,34 @@ async function get(path) {
   return data;
 }
 
+async function del(path, body) {
+  const base = getApiUrl();
+  if (!base) throw new ApiError('offline', 'Game server is not configured.');
+  const token = await freshIdToken();
+  let res;
+  try {
+    res = await fetch(`${base}${path}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body || {}),
+    });
+  } catch {
+    throw new ApiError('network', 'Could not reach the game server. Check your connection.');
+  }
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* ignore */
+  }
+  checkBanned(res, data);
+  if (!res.ok || (data && data.ok === false)) {
+    const code = (data && data.error) || `http_${res.status}`;
+    throw new ApiError(code, friendlyMessage(code, data), data);
+  }
+  return data;
+}
+
 function friendlyMessage(code, data) {
   switch (code) {
     case 'cooldown':
@@ -186,6 +214,10 @@ export const api = {
   withdrawCreate: (binanceUid, petals) => post('/api/withdraw', { binanceUid, petals }),
   withdrawMine: () => get('/api/withdraw/mine'),
   withdrawRates: () => get('/api/withdraw/rates'),
+  notifFriendRequest: (recipientUid) => post('/api/notifications/friend-request', { recipientUid }),
+  notifVeyraPush: (chatId, recipientUid, text) => post('/api/notifications/veyra-push', { chatId, recipientUid, text }),
+  notifRegisterToken: (token) => post('/api/notifications/fcm-token', { token }),
+  notifUnregisterToken: (token) => del('/api/notifications/fcm-token', { token }),
   supportRead: (ticketId) => post(`/api/support/${encodeURIComponent(ticketId)}/read`, {}),
 };
 
