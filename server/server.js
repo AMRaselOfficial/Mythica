@@ -52,6 +52,7 @@ app.use(
   require('./routes/events'),
   require('./routes/support'),
   require('./routes/leaderboard'),
+  require('./routes/withdraw'),
   require('./routes/admin')
 );
 
