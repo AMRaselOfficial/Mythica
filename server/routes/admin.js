@@ -619,6 +619,7 @@ const {
   whereEquals,
   eventJoinId,
   medalGrantId,
+  listCollection,
 } = require('../lib/events');
 const { syncBestWeaponPower } = require('../lib/leaderboard');
 
@@ -1097,6 +1098,223 @@ router.post('/admin/support/:ticketId/read', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('POST /api/admin/support/:ticketId/read failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/* ============================================================
+ * Petal withdrawals — admin review and payout.
+ *
+ * Player requests are created via POST /api/withdraw (petals are deducted
+ * immediately). The admin reviews each request here, verifies the player's
+ * account and earn history, sends the USD via Binance manually, then marks
+ * the request completed. Rejecting refunds the petals automatically.
+ *
+ * GET  /api/admin/withdrawals            list (query: status, limit)
+ * GET  /api/admin/withdrawals/:id        detail + player earn summary
+ * POST /api/admin/withdrawals/:id/approve   {adminNote?}
+ * POST /api/admin/withdrawals/:id/reject    {adminNote?}  (refunds petals)
+ * POST /api/admin/withdrawals/:id/complete  {adminNote?}  (marks as paid)
+ * ============================================================ */
+
+function publicWithdrawalAdmin(id, d) {
+  const toMillis = (v) => {
+    if (v == null) return 0;
+    if (typeof v === 'number') return v;
+    if (typeof v.toMillis === 'function') return v.toMillis();
+    if (v instanceof Date) return v.getTime();
+    return 0;
+  };
+  return {
+    id,
+    uid: d.uid || '',
+    displayName: d.displayName || '',
+    email: d.email || '',
+    binanceUid: d.binanceUid || '',
+    petals: d.petals || 0,
+    usd: d.usd || 0,
+    status: d.status || 'pending',
+    adminNote: d.adminNote || '',
+    createdAt: toMillis(d.createdAt),
+    updatedAt: toMillis(d.updatedAt),
+    processedAt: toMillis(d.processedAt),
+  };
+}
+
+/** List withdrawal requests, newest first. Optional ?status=pending|approved|rejected|completed */
+router.get('/admin/withdrawals', async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    let rows = await listCollection(db, USE_FAKE, 'withdrawals');
+    if (status && ['pending', 'approved', 'rejected', 'completed'].includes(status)) {
+      rows = rows.filter((r) => r.data.status === status);
+    }
+    rows.sort((a, b) => (b.data.createdAt || 0) - (a.data.createdAt || 0));
+    res.json({
+      ok: true,
+      withdrawals: rows.slice(0, limit).map((r) => publicWithdrawalAdmin(r.id, r.data)),
+    });
+  } catch (e) {
+    console.error('GET /api/admin/withdrawals failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Withdrawal detail + player account and earn summary for verification. */
+router.get('/admin/withdrawals/:id', async (req, res) => {
+  try {
+    const wdSnap = await db.collection('withdrawals').doc(req.params.id).get();
+    if (!wdSnap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    const wd = wdSnap.data();
+
+    // Player account snapshot
+    const playerSnap = await db.collection('players').doc(wd.uid).get();
+    const player = playerSnap.exists ? playerSnap.data() : null;
+
+    // Earn history: recent activity logs for this player (hunts, trades, etc.)
+    let earnHistory = [];
+    try {
+      const logs = await whereEquals(db, USE_FAKE, 'activityLogs', 'uid', wd.uid);
+      logs.sort((a, b) => (b.data.createdAt || 0) - (a.data.createdAt || 0));
+      earnHistory = logs.slice(0, 30).map((r) => {
+        const l = r.data;
+        return { id: r.id, type: l.type || '', details: l.details || null, createdAt: toMillis(l.createdAt) };
+      });
+    } catch (e) {
+      console.error('withdrawal earn-history lookup failed:', e && e.message);
+    }
+
+    // Other withdrawals by this player
+    let otherWithdrawals = [];
+    try {
+      const others = await whereEquals(db, USE_FAKE, 'withdrawals', 'uid', wd.uid);
+      others.sort((a, b) => (b.data.createdAt || 0) - (a.data.createdAt || 0));
+      otherWithdrawals = others
+        .filter((r) => r.id !== wdSnap.id)
+        .slice(0, 10)
+        .map((r) => publicWithdrawalAdmin(r.id, r.data));
+    } catch (e) {
+      console.error('withdrawal sibling lookup failed:', e && e.message);
+    }
+
+    res.json({
+      ok: true,
+      withdrawal: publicWithdrawalAdmin(wdSnap.id, wd),
+      player: player ? {
+        displayName: player.displayName || '',
+        email: player.email || '',
+        level: player.level || 1,
+        xp: player.xp || 0,
+        petals: player.petals || 0,
+        accountStatus: player.accountStatus || 'active',
+        playerCode: player.playerCode || '',
+        createdAt: player.createdAt && typeof player.createdAt.toMillis === 'function' ? player.createdAt.toMillis() : (player.createdAt || 0),
+      } : null,
+      earnHistory,
+      otherWithdrawals,
+    });
+  } catch (e) {
+    console.error('GET /api/admin/withdrawals/:id failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+async function setWithdrawalStatus(id, status, adminUid, adminNote) {
+  const now = Date.now();
+  const wdRef = db.collection('withdrawals').doc(id);
+
+  return db.runTransaction(async (tx) => {
+    // All reads first (Firestore requires reads before writes in a transaction).
+    const wdSnap = await tx.get(wdRef);
+    if (!wdSnap.exists) return { error: 'not_found' };
+    const wd = wdSnap.data();
+    const from = wd.status || 'pending';
+
+    // Allowed transitions:
+    //   pending   → approved | rejected
+    //   approved  → completed | rejected
+    const allowed = {
+      pending: ['approved', 'rejected'],
+      approved: ['completed', 'rejected'],
+    };
+    if (!(allowed[from] || []).includes(status)) {
+      return { error: 'bad_transition', from, status };
+    }
+
+    // Read the player doc now if we might need to refund.
+    let playerSnap = null;
+    let playerRef = null;
+    if (status === 'rejected') {
+      playerRef = db.collection('players').doc(wd.uid);
+      playerSnap = await tx.get(playerRef);
+    }
+
+    // Now all writes.
+    const update = { status, updatedAt: now, adminNote: String(adminNote || '') };
+    if (status === 'approved' || status === 'completed' || status === 'rejected') {
+      update.processedAt = now;
+    }
+    tx.update(wdRef, update);
+
+    // Refund petals on rejection.
+    let refunded = 0;
+    if (status === 'rejected' && playerSnap && playerSnap.exists) {
+      const balance = playerSnap.data().petals || 0;
+      refunded = wd.petals || 0;
+      tx.update(playerRef, { petals: balance + refunded, updatedAt: now });
+    }
+
+    const logRef = db.collection('activityLogs').doc();
+    tx.set(logRef, {
+      type: 'withdraw_' + status,
+      uid: wd.uid,
+      withdrawalId: id,
+      petals: wd.petals || 0,
+      usd: wd.usd || 0,
+      by: adminUid,
+      createdAt: now,
+    });
+
+    return { ok: true, refunded };
+  });
+}
+
+/** Approve a withdrawal (admin will pay out via Binance manually). */
+router.post('/admin/withdrawals/:id/approve', async (req, res) => {
+  try {
+    const adminNote = String(req.body?.adminNote || '').slice(0, 500);
+    const result = await setWithdrawalStatus(req.params.id, 'approved', req.uid, adminNote);
+    if (result.error) return res.status(400).json({ ok: false, error: result.error });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/admin/withdrawals/:id/approve failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Reject a withdrawal — petals are refunded automatically. */
+router.post('/admin/withdrawals/:id/reject', async (req, res) => {
+  try {
+    const adminNote = String(req.body?.adminNote || '').slice(0, 500);
+    const result = await setWithdrawalStatus(req.params.id, 'rejected', req.uid, adminNote);
+    if (result.error) return res.status(400).json({ ok: false, error: result.error });
+    res.json({ ok: true, refunded: result.refunded || 0 });
+  } catch (e) {
+    console.error('POST /api/admin/withdrawals/:id/reject failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Mark an approved withdrawal as completed (payout sent via Binance). */
+router.post('/admin/withdrawals/:id/complete', async (req, res) => {
+  try {
+    const adminNote = String(req.body?.adminNote || '').slice(0, 500);
+    const result = await setWithdrawalStatus(req.params.id, 'completed', req.uid, adminNote);
+    if (result.error) return res.status(400).json({ ok: false, error: result.error });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('POST /api/admin/withdrawals/:id/complete failed:', e);
     res.status(500).json({ ok: false, error: 'internal' });
   }
 });
