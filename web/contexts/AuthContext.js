@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   createUserWithEmailAndPassword,
@@ -26,31 +26,11 @@ const PLAYER_DEFAULTS = {
   accountStatus: 'active',
 };
 
-// Prevents concurrent ensurePlayerDoc calls for the same user (signup/login
-// both trigger it directly AND via onAuthStateChanged). Without this, two
-// calls race: both see "doc missing", both setDoc, and the loser gets a
-// Firestore "Missing or insufficient permissions" because its write lands as
-// an update with fields the rules don't allow clients to change.
-const pendingEnsures = new Map();
-
+// Player doc is created/verified by the onAuthStateChanged listener only.
+// signup()/login() do NOT call this directly — doing so fired before
+// Firestore saw the new auth token, causing spurious permission errors.
 async function ensurePlayerDoc(db, user, displayName) {
-  const uid = user.uid;
-  if (pendingEnsures.has(uid)) return pendingEnsures.get(uid);
-  const run = (async () => {
-    await ensurePlayerDocInner(db, user, displayName);
-  })();
-  pendingEnsures.set(uid, run);
-  try {
-    return await run;
-  } finally {
-    pendingEnsures.delete(uid);
-  }
-}
-
-async function ensurePlayerDocInner(db, user, displayName) {
-  // Right after signup/login, Firestore may not see the auth token yet,
-  // causing a spurious "Missing or insufficient permissions" on the first
-  // write. Force a token refresh so request.auth is populated in the rules.
+  // Defensive: ensure the ID token is fresh so Firestore rules see request.auth.
   try {
     await user.getIdToken(true);
   } catch {
@@ -59,36 +39,14 @@ async function ensurePlayerDocInner(db, user, displayName) {
   const ref = doc(db, 'players', user.uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
-    const docData = {
+    await setDoc(ref, {
       displayName: displayName || user.displayName || user.email?.split('@')[0] || 'Wanderer',
       email: user.email || '',
       ...PLAYER_DEFAULTS,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       lastHuntAt: null,
-    };
-    // The auth token can take a moment to propagate to Firestore after
-    // signup. Retry permission-denied errors with backoff instead of
-    // surfacing a spurious error to the user.
-    let lastError = null;
-    for (let attempt = 0; attempt < 4; attempt++) {
-      try {
-        await setDoc(ref, docData);
-        lastError = null;
-        break;
-      } catch (e) {
-        lastError = e;
-        const isPermissionError = e?.code === 'permission-denied'
-          || /insufficient permissions/i.test(e?.message || '');
-        if (isPermissionError && attempt < 3) {
-          await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
-          try { await user.getIdToken(true); } catch { /* ignore */ }
-          continue;
-        }
-        throw e;
-      }
-    }
-    if (lastError) throw lastError;
+    });
     // New accounts need a traveler code right away. The client can't write
     // playerCode itself (Firestore rules forbid it), so ask the game server
     // to generate one via /api/player/me (which calls ensurePlayerIdentity).
@@ -127,6 +85,11 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState('');
   const [banned, setBanned] = useState(false);
+  // Display name chosen at signup, consumed by the auth-state listener when it
+  // creates the player doc. (signup() no longer creates the doc directly —
+  // doing so races Firestore's auth propagation and caused spurious
+  // "Missing or insufficient permissions" errors.)
+  const pendingDisplayName = useRef(null);
 
   useEffect(() => {
     if (!configured) {
@@ -139,7 +102,9 @@ export function AuthProvider({ children }) {
       setUser(u);
       if (u) {
         try {
-          await ensurePlayerDoc(fb.db, u);
+          const dn = pendingDisplayName.current || undefined;
+          pendingDisplayName.current = null;
+          await ensurePlayerDoc(fb.db, u, dn);
         } catch (e) {
           setAuthError('Could not load your traveler record.');
         }
@@ -180,6 +145,7 @@ export function AuthProvider({ children }) {
   const signup = useCallback(
     async (email, password, displayName) => {
       const fb = getFirebase();
+      if (displayName) pendingDisplayName.current = displayName;
       const cred = await createUserWithEmailAndPassword(fb.auth, email, password);
       if (displayName) {
         try {
@@ -188,15 +154,17 @@ export function AuthProvider({ children }) {
           /* ignore */
         }
       }
-      await ensurePlayerDoc(fb.db, cred.user, displayName);
+      // Player doc creation is handled by the onAuthStateChanged listener
+      // (which fires after auth is fully propagated to Firestore). Calling
+      // ensurePlayerDoc here directly caused spurious permission errors.
     },
     []
   );
 
   const login = useCallback(async (email, password) => {
     const fb = getFirebase();
-    const cred = await signInWithEmailAndPassword(fb.auth, email, password);
-    await ensurePlayerDoc(fb.db, cred.user);
+    await signInWithEmailAndPassword(fb.auth, email, password);
+    // Player doc creation/verification is handled by onAuthStateChanged.
   }, []);
 
   const logout = useCallback(async () => {
