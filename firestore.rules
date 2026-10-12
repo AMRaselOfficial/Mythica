@@ -183,6 +183,24 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- Notifications: server-written bell notifications. Users can read
+    // their own and mark them as read (only the `read` field may change).
+    match /notifications/{notificationId} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow create, delete: if false;
+    }
+
+    // ---- FCM tokens: registered via POST /api/notifications/fcm-token,
+    // used by the server to send Veyra push notifications. No direct client
+    // access.
+    match /fcmTokens/{tokenId} {
+      allow read, write: if false;
+    }
+
     // ---- Social: public traveler profiles (base info only, server-maintained)
     // Banned travelers are hidden: their docs fail the read rule, so they
     // vanish from friend lists and profile lookups automatically.
