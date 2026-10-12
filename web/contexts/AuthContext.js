@@ -181,6 +181,19 @@ export function AuthProvider({ children }) {
     if (banned) logout();
   }, [banned, logout]);
 
+  // Register for Veyra push notifications once signed in (best effort).
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { ensurePush } = await import('../lib/push.js');
+        if (!cancelled) await ensurePush();
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
   const resetPassword = useCallback(async (email) => {
     const fb = getFirebase();
     await sendPasswordResetEmail(fb.auth, email);
