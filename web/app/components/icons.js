@@ -7,7 +7,7 @@ import {
   Check, X, Plus, Ticket, CloudMoon, PawPrint, Leaf, TrendingUp, Star, Tag,
   CircleHelp, Inbox, Send, Tent, Gamepad2, ScrollText, Waves, Medal, Lock,
   Settings, Lightbulb, Hand, Menu, ArrowUp, CalendarDays, Users, ShoppingBag,
-  ArrowLeftRight, User, Bell, ChevronDown, Info, Clock, Trophy, Zap,
+  ArrowLeftRight, User, Bell, ChevronDown, Info, Clock, Trophy, Zap, Shield,
 } from 'lucide-react';
 
 const MAP = {
@@ -57,6 +57,7 @@ const MAP = {
   swap: ArrowLeftRight,
   user: User,
   bell: Bell,
+  shield: Shield,
   chevronDown: ChevronDown,
   info: Info,
   clock: Clock,
