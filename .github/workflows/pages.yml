@@ -58,6 +58,7 @@ jobs:
           NEXT_PUBLIC_FIREBASE_APP_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID }}
           NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_BASE_PATH: /Mythica
+          NEXT_PUBLIC_FCM_VAPID_KEY: BL1yuwIoQvKx0ONJyhmdr99jqw-KT9gCTcS3j_D6vCAVjQAyLZvoQRmnaGDL69QQRuQSexIZ_EmN_HsPef6mslE
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
