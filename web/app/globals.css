@@ -333,6 +333,29 @@ img {
   background: var(--teal, #2dd4bf);
 }
 
+/* Mobile: notification panel becomes a full-width sheet below the header. */
+@media (max-width: 719px) {
+  .notif-bell-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+  .notif-panel {
+    position: fixed;
+    top: 3.75rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    width: auto;
+    max-height: calc(100vh - 5rem);
+    z-index: 300;
+  }
+  .notif-list {
+    max-height: calc(100vh - 9rem);
+  }
+  .notif-item {
+    padding: 0.85rem 1rem;
+  }
+}
+
 /* Sign-out lives in the header on desktop, inside the hamburger
    dropdown on mobile. */
 .nav-signout-mobile {
