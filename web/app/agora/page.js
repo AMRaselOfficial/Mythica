@@ -7,6 +7,7 @@ import { Icon } from '../components/icons.js';
 import TravelerModal from '../components/TravelerModal.js';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { getFirebase } from '../../lib/firebase.js';
+import { api } from '../../lib/api.js';
 import { sfx } from '../../lib/audio.js';
 import {
   AGORA_SEND_MIN_LEVEL,
@@ -45,6 +46,9 @@ function AgoraInner() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
   const [selectedUid, setSelectedUid] = useState(null);
+  const [codeQuery, setCodeQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const bottomRef = useRef(null);
 
   const level = player?.level || 1;
@@ -145,6 +149,30 @@ function AgoraInner() {
     }
   };
 
+  const searchByCode = async (e) => {
+    e.preventDefault();
+    const code = codeQuery.trim().toUpperCase();
+    if (!code || searching) return;
+    setSearching(true);
+    setSearchError('');
+    try {
+      const res = await api.playerByCode(code);
+      if (res?.ok && res.uid) {
+        sfx.click();
+        setSelectedUid(res.uid);
+        setCodeQuery('');
+      } else {
+        setSearchError('No traveler found with that code.');
+      }
+    } catch (err) {
+      sfx.error();
+      const code = err?.code || '';
+      setSearchError(code === 'not_found' ? 'No traveler found with that code.' : (err.message || 'Search failed.'));
+    } finally {
+      setSearching(false);
+    }
+  };
+
   return (
     <div className="page">
       <h1 className="serif"><Icon name="agora" /> Agora</h1>
@@ -154,6 +182,34 @@ function AgoraInner() {
           <> Reach <strong>level {AGORA_SEND_MIN_LEVEL}</strong> to speak; until then you can read along.</>
         )}
       </p>
+
+      <form
+        onSubmit={searchByCode}
+        style={{
+          display: 'flex',
+          gap: '0.5rem',
+          marginBottom: '1rem',
+        }}
+      >
+        <input
+          className="input"
+          style={{ flex: 1 }}
+          placeholder="Find a traveler by code…"
+          value={codeQuery}
+          maxLength={10}
+          onChange={(e) => setCodeQuery(e.target.value.toUpperCase())}
+          disabled={searching}
+          aria-label="Search traveler by code"
+        />
+        <button
+          className="btn btn-ghost"
+          type="submit"
+          disabled={searching || !codeQuery.trim()}
+        >
+          {searching ? 'Searching…' : <><Icon name="search" /> Find</>}
+        </button>
+      </form>
+      {searchError && <ErrorNotice message={searchError} />}
 
       <div
         className="card"
