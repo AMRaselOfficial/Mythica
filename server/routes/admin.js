@@ -707,6 +707,18 @@ router.post('/admin/events', async (req, res) => {
       createdBy: req.uid,
     });
     await safeLog({ uid: req.uid, type: 'admin_event_create', details: { id, title: event.title, byUid: req.uid } });
+    // Notify all players of the new event (bell notification).
+    try {
+      await broadcastNotif(db, USE_FAKE, {
+        type: 'event_update',
+        title: 'New event: ' + event.title,
+        body: (event.description || 'A new event has started. Check it out!').slice(0, 200),
+        link: '/events',
+        relatedId: id,
+      });
+    } catch (e) {
+      console.error('event broadcast notification failed:', e && e.message);
+    }
     res.json({ ok: true, id, event: publicEvent(id, event) });
   } catch (e) {
     console.error('POST /api/admin/events failed:', e);
@@ -1055,6 +1067,19 @@ router.post('/admin/support/:ticketId/reply', async (req, res) => {
       console.error('support reply activity log failed:', e && e.message);
     }
     const snap = await t.ref.get();
+    // Notify the player of the admin reply (bell notification).
+    try {
+      await createNotif(db, {
+        uid: t.data.uid,
+        type: 'support_reply',
+        title: 'Support replied',
+        body: `The support team replied to your ticket "${t.data.title || 'your ticket'}".`,
+        link: '/support',
+        relatedId: t.id,
+      });
+    } catch (e) {
+      console.error('support reply notification failed:', e && e.message);
+    }
     res.json({ ok: true, ticket: publicSupportTicket(t.id, snap.data()) });
   } catch (e) {
     console.error('POST /api/admin/support/:ticketId/reply failed:', e);
@@ -1315,6 +1340,169 @@ router.post('/admin/withdrawals/:id/complete', async (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('POST /api/admin/withdrawals/:id/complete failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/* ============================================================
+ * Admin notifications — send direct messages and broadcasts.
+ *
+ * POST /api/admin/notifications/send       {uid, title, body, petalChange?}
+ *   Send an admin message to one player. Optional petalChange (positive or
+ *   negative) adjusts their petals with the message as the reason.
+ * POST /api/admin/notifications/broadcast  {title, body}
+ *   System update broadcast to all active players.
+ * ============================================================ */
+
+const { createNotification: createNotif, broadcastNotification: broadcastNotif } =
+  require('../lib/notifications');
+
+/** Send an admin message to one player, optionally adjusting petals. */
+router.post('/admin/notifications/send', async (req, res) => {
+  try {
+    const targetUid = String(req.body?.uid || '').trim();
+    const title = String(req.body?.title || '').trim().slice(0, 120);
+    const body = String(req.body?.body || '').trim().slice(0, 500);
+    const petalChange = Math.trunc(Number(req.body?.petalChange) || 0);
+
+    if (!targetUid) return res.status(400).json({ ok: false, error: 'bad_uid' });
+    if (!title || !body) return res.status(400).json({ ok: false, error: 'bad_message' });
+    if (!Number.isFinite(petalChange) || Math.abs(petalChange) > 1000000) {
+      return res.status(400).json({ ok: false, error: 'bad_petal_change' });
+    }
+
+    const now = Date.now();
+    const result = await db.runTransaction(async (tx) => {
+      const playerRef = db.collection('players').doc(targetUid);
+      const playerSnap = await tx.get(playerRef);
+      if (!playerSnap.exists) return { error: 'not_found' };
+      const player = playerSnap.data();
+
+      let newBalance = player.petals || 0;
+      if (petalChange !== 0) {
+        newBalance = Math.max(0, newBalance + petalChange);
+        tx.update(playerRef, { petals: newBalance, updatedAt: now });
+      }
+
+      const notifRef = db.collection('notifications').doc();
+      tx.set(notifRef, {
+        uid: targetUid,
+        type: 'admin_message',
+        title,
+        body,
+        link: '',
+        relatedId: '',
+        read: false,
+        createdAt: now,
+      });
+
+      const logRef = db.collection('activityLogs').doc();
+      tx.set(logRef, {
+        type: 'admin_message',
+        uid: targetUid,
+        by: req.uid,
+        title,
+        petalChange,
+        newBalance,
+        createdAt: now,
+      });
+
+      return { notificationId: notifRef.id, newBalance, petalChange };
+    });
+
+    if (result.error) return res.status(404).json({ ok: false, error: result.error });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    console.error('POST /api/admin/notifications/send failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Broadcast a system update to all active players. */
+router.post('/admin/notifications/broadcast', async (req, res) => {
+  try {
+    const title = String(req.body?.title || '').trim().slice(0, 120);
+    const body = String(req.body?.body || '').trim().slice(0, 500);
+    if (!title || !body) return res.status(400).json({ ok: false, error: 'bad_message' });
+
+    const count = await broadcastNotif(db, USE_FAKE, {
+      type: 'system_update',
+      title,
+      body,
+      link: '/dashboard',
+    });
+
+    try {
+      await logActivity(db, {
+        uid: req.uid,
+        type: 'admin_broadcast',
+        details: { title, count, by: req.uid },
+      });
+    } catch (e) {
+      console.error('broadcast activity log failed:', e && e.message);
+    }
+
+    res.json({ ok: true, sent: count });
+  } catch (e) {
+    console.error('POST /api/admin/notifications/broadcast failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/* ============================================================
+ * Admin notification management — list and delete.
+ *
+ * GET /api/admin/notifications  ?type=&uid=&limit=
+ * DELETE /api/admin/notifications/:id
+ * ============================================================ */
+
+/** List notifications with optional type/uid filters (newest first). */
+router.get('/admin/notifications', async (req, res) => {
+  try {
+    const type = String(req.query.type || '').trim();
+    const uid = String(req.query.uid || '').trim();
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+
+    let items;
+    if (USE_FAKE) {
+      let all = db._listAll('notifications');
+      if (type) all = all.filter(({ data }) => data().type === type);
+      if (uid) all = all.filter(({ data }) => data().uid === uid);
+      all.sort((a, b) => (b.data().createdAt || 0) - (a.data().createdAt || 0));
+      items = all.slice(0, limit).map(({ id, data }) => ({ id, ...data() }));
+    } else {
+      let q = db.collection('notifications').orderBy('createdAt', 'desc').limit(limit);
+      if (type) q = q.where('type', '==', type);
+      if (uid) q = q.where('uid', '==', uid);
+      const snap = await q.get();
+      items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
+    res.json({ ok: true, notifications: items });
+  } catch (e) {
+    console.error('GET /api/admin/notifications failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
+/** Delete a single notification. */
+router.delete('/admin/notifications/:id', async (req, res) => {
+  try {
+    const ref = db.collection('notifications').doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+    await ref.delete();
+    try {
+      await logActivity(db, {
+        uid: req.uid,
+        type: 'admin_notification_delete',
+        details: { notificationId: req.params.id, by: req.uid },
+      });
+    } catch (e) {
+      console.error('notification delete activity log failed:', e && e.message);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('DELETE /api/admin/notifications/:id failed:', e);
     res.status(500).json({ ok: false, error: 'internal' });
   }
 });
