@@ -59,14 +59,36 @@ async function ensurePlayerDocInner(db, user, displayName) {
   const ref = doc(db, 'players', user.uid);
   const snap = await getDoc(ref);
   if (!snap.exists()) {
-    await setDoc(ref, {
+    const docData = {
       displayName: displayName || user.displayName || user.email?.split('@')[0] || 'Wanderer',
       email: user.email || '',
       ...PLAYER_DEFAULTS,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       lastHuntAt: null,
-    });
+    };
+    // The auth token can take a moment to propagate to Firestore after
+    // signup. Retry permission-denied errors with backoff instead of
+    // surfacing a spurious error to the user.
+    let lastError = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        await setDoc(ref, docData);
+        lastError = null;
+        break;
+      } catch (e) {
+        lastError = e;
+        const isPermissionError = e?.code === 'permission-denied'
+          || /insufficient permissions/i.test(e?.message || '');
+        if (isPermissionError && attempt < 3) {
+          await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+          try { await user.getIdToken(true); } catch { /* ignore */ }
+          continue;
+        }
+        throw e;
+      }
+    }
+    if (lastError) throw lastError;
     // New accounts need a traveler code right away. The client can't write
     // playerCode itself (Firestore rules forbid it), so ask the game server
     // to generate one via /api/player/me (which calls ensurePlayerIdentity).
