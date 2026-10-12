@@ -1507,4 +1507,32 @@ router.delete('/admin/notifications/:id', async (req, res) => {
   }
 });
 
+/** Update a notification's title/body. */
+router.patch('/admin/notifications/:id', async (req, res) => {
+  try {
+    const title = String(req.body?.title || '').trim().slice(0, 120);
+    const body = String(req.body?.body || '').trim().slice(0, 500);
+    if (!title || !body) return res.status(400).json({ ok: false, error: 'bad_message' });
+
+    const ref = db.collection('notifications').doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ ok: false, error: 'not_found' });
+
+    await ref.update({ title, body, updatedAt: Date.now() });
+    try {
+      await logActivity(db, {
+        uid: req.uid,
+        type: 'admin_notification_edit',
+        details: { notificationId: req.params.id, by: req.uid },
+      });
+    } catch (e) {
+      console.error('notification edit activity log failed:', e && e.message);
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('PATCH /api/admin/notifications/:id failed:', e);
+    res.status(500).json({ ok: false, error: 'internal' });
+  }
+});
+
 module.exports = router;
