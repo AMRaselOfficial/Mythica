@@ -274,3 +274,25 @@ test('notifications: admin list/delete requires admin', async () => {
     await close();
   }
 });
+
+test('notifications: admin can edit a notification', async () => {
+  const { base, close } = await startServer();
+  try {
+    await resetFakeDb();
+    await seedPlayer('u1');
+    const id = await createNotification(db, {
+      uid: 'u1', type: 'system_update', title: 'Old', body: 'Old body',
+    });
+    const res = await fetch(base + `/api/admin/notifications/${id}`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer test-admin-root', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'New', body: 'New body' }),
+    });
+    assert.equal(res.status, 200);
+    const snap = await db.collection('notifications').doc(id).get();
+    assert.equal(snap.data().title, 'New');
+    assert.equal(snap.data().body, 'New body');
+  } finally {
+    await close();
+  }
+});
