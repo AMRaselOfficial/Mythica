@@ -10,7 +10,7 @@ import {
   updateProfile,
 } from 'firebase/auth';
 import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
-import { getFirebase, isConfigured } from '../lib/firebase.js';
+import { getFirebase, getApiUrl, isConfigured } from '../lib/firebase.js';
 import { onAccountBanned } from '../lib/api.js';
 import { link } from '../lib/paths.js';
 import { setMusicEnabled, setSfxEnabled } from '../lib/audio.js';
@@ -38,6 +38,34 @@ async function ensurePlayerDoc(db, user, displayName) {
       updatedAt: serverTimestamp(),
       lastHuntAt: null,
     });
+    // New accounts need a traveler code right away. The client can't write
+    // playerCode itself (Firestore rules forbid it), so ask the game server
+    // to generate one via /api/player/me (which calls ensurePlayerIdentity).
+    try {
+      const token = await user.getIdToken();
+      const apiUrl = getApiUrl();
+      if (apiUrl && token) {
+        await fetch(`${apiUrl}/api/player/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch {
+      /* non-fatal: the code will be generated on the first hunt instead */
+    }
+  } else if (!snap.data()?.playerCode) {
+    // Older accounts created before the traveler-code feature (or ones that
+    // missed it) get a code now. Same server call as above.
+    try {
+      const token = await user.getIdToken();
+      const apiUrl = getApiUrl();
+      if (apiUrl && token) {
+        await fetch(`${apiUrl}/api/player/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch {
+      /* non-fatal: the code will be generated on the first hunt instead */
+    }
   }
 }
 
