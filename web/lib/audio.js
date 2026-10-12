@@ -209,4 +209,8 @@ export const sfx = {
     blip({ freq: 440, freqEnd: 660, dur: 0.5, type: 'sine', vol: 0.12 });
     blip({ freq: 880, dur: 0.4, type: 'sine', vol: 0.1, delay: 0.25 });
   },
+  notification() {
+    blip({ freq: 880, dur: 0.12, type: 'sine', vol: 0.15 });
+    blip({ freq: 1174, dur: 0.18, type: 'sine', vol: 0.15, delay: 0.1 });
+  },
 };
