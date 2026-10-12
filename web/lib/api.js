@@ -183,6 +183,9 @@ export const api = {
   supportMine: () => get('/api/support/mine'),
   supportReply: (ticketId, text) =>
     post(`/api/support/${encodeURIComponent(ticketId)}/reply`, { text }),
+  withdrawCreate: (binanceUid, petals) => post('/api/withdraw', { binanceUid, petals }),
+  withdrawMine: () => get('/api/withdraw/mine'),
+  withdrawRates: () => get('/api/withdraw/rates'),
   supportRead: (ticketId) => post(`/api/support/${encodeURIComponent(ticketId)}/read`, {}),
 };
 
