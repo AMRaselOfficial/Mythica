@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { link } from '../../lib/paths.js';
 import { sfx } from '../../lib/audio.js';
 import { useAuth } from '../../contexts/AuthContext.js';
+import { api } from '../../lib/api.js';
 import {
   getPublicProfile,
   getFriendshipStatus,
@@ -73,6 +74,8 @@ export default function TravelerModal({ uid, onClose }) {
     setError('');
     try {
       await sendFriendRequest(user.uid, uid);
+      // Notify the recipient (bell notification) — best effort.
+      try { await api.notifFriendRequest(uid); } catch { /* ignore */ }
       sfx.click();
       setStatus('pending-sent');
     } catch (e) {
