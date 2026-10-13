@@ -6,7 +6,6 @@ import {
   doc,
   limit,
   onSnapshot,
-  orderBy,
   query,
   updateDoc,
   where,
@@ -59,13 +58,14 @@ export default function NotificationBell({ uid }) {
       const q = query(
         collection(db, 'notifications'),
         where('uid', '==', uid),
-        orderBy('createdAt', 'desc'),
         limit(30)
       );
       unsub = onSnapshot(
         q,
         (snap) => {
-          const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          const items = snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
           setNotifications(items);
           const unread = items.filter((n) => !n.read).length;
           // Play a subtle sound when a new unread notification arrives.
