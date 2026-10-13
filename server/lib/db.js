@@ -165,6 +165,7 @@ function realDb() {
   return {
     collection: (name) => fs.collection(name),
     runTransaction: (fn) => fs.runTransaction(fn),
+    batch: () => fs.batch(),
   };
 }
 
