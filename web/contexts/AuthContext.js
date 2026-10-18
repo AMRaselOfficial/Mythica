@@ -21,6 +21,7 @@ const PLAYER_DEFAULTS = {
   petals: 20,
   level: 1,
   xp: 0,
+  equippedWeaponId: 'worn-blade',
   musicEnabled: true,
   sfxEnabled: true,
   accountStatus: 'active',
