@@ -85,12 +85,6 @@ function ProfileInner() {
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem', padding: '0.75rem 1rem' }}>
           <div>
             <div style={{ fontSize: '0.8rem', color: 'var(--ink-dim)' }}>Your traveler code — share it to trade</div>
-            {user?.uid && (
-              <div style={{ marginTop: '0.5rem' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--ink-dim)' }}>Your UID</div>
-                <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', wordBreak: 'break-all', color: 'var(--ink)' }}>{user.uid}</div>
-              </div>
-            )}
             <div style={{ fontSize: '1.5rem', fontWeight: 700, letterSpacing: '0.15em', color: 'var(--gold-soft)' }}>
               {player.playerCode}
             </div>
