@@ -31,7 +31,7 @@ importScripts('https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-com
     const link = (payload.data && payload.data.link) || '/veyra';
     self.registration.showNotification(title, {
       body,
-      icon: '/Mythica/assets/logo.png',
+      icon: '/assets/logo.png',
       data: { link },
       tag: 'mythica-veyra',
     });
