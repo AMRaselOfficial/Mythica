@@ -69,6 +69,41 @@ async function uidByCode(code) {
   return snap.docs[0].id;
 }
 
+const STARTER_WEAPON_ID = 'worn-blade';
+
+/**
+ * Ensure the player owns the starter weapon (Worn Blade) in their inventory
+ * and has it equipped. Called at signup via ensurePlayerIdentity so new
+ * players start with a weapon. Safe to call on every request (no-op if the
+ * player already owns the weapon).
+ */
+async function ensureStarterWeapon(uid) {
+  try {
+    const invRef = db.collection('inventories').doc(uid).collection('items').doc(STARTER_WEAPON_ID);
+    const invSnap = await invRef.get();
+    if (!invSnap.exists) {
+      await invRef.set({
+        quantity: 1,
+        upgradeLevel: 0,
+        stars: 0,
+        obtainedAt: Date.now(),
+      });
+    }
+    // Ensure the player doc has the starter equipped.
+    const playerRef = db.collection('players').doc(uid);
+    const playerSnap = await playerRef.get();
+    if (playerSnap.exists) {
+      const data = playerSnap.data();
+      if (!data.equippedWeaponId) {
+        await playerRef.update({ equippedWeaponId: STARTER_WEAPON_ID, updatedAt: Date.now() });
+      }
+    }
+  } catch (e) {
+    // Non-fatal: the weapon will be granted on first hunt as a fallback.
+    console.error('ensureStarterWeapon failed for', uid, e.message);
+  }
+}
+
 /**
  * Ensure a player document carries its own identity fields: `uid` (the
  * Firebase Auth UID, also the doc ID) and a unique `playerCode`.
@@ -94,9 +129,10 @@ async function ensurePlayerIdentity(uid) {
       if (retry.exists) return retry.data().playerCode || null;
       throw e;
     }
-    return update.playerCode || data.playerCode || null;
   }
-  return data.playerCode || null;
+  // Grant the starter weapon (no-op if already owned).
+  await ensureStarterWeapon(uid);
+  return data.playerCode || update.playerCode || null;
 }
 
-module.exports = { generateUniqueCode, ensurePlayerCode, ensurePlayerIdentity, uidByCode, CODE_LEN };
+module.exports = { generateUniqueCode, ensurePlayerCode, ensurePlayerIdentity, ensureStarterWeapon, uidByCode, CODE_LEN };
