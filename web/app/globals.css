@@ -1543,7 +1543,7 @@ body {
 input[type="password"].input,
 input[type="password"] {
   background: #0d1226 !important;
-  border: 1px solid var(--line) !important;
+  border: 1px solid #4a5568 !important;
   color: var(--ink) !important;
   border-radius: 10px !important;
   padding: 0.7rem 0.9rem !important;
@@ -1654,13 +1654,14 @@ input:-webkit-autofill:focus {
 
 /* Fix: Inventory filter chips match input height */
 .toolbar .chip {
-  height: 44px !important;
-  min-height: 44px !important;
+  height: 45px !important;
+  min-height: 45px !important;
   display: inline-flex !important;
   align-items: center;
-  padding: 0 1rem !important;
+  padding: 0.7rem 1rem !important;
   box-sizing: border-box;
   line-height: 1;
+  font-size: 1rem !important;
 }
 
 /* Fix: Event medals — prevent bad wrapping */
