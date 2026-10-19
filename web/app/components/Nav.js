@@ -146,6 +146,7 @@ function LogoMark() {
       aria-hidden="true"
       width={34}
       height={34}
+      style={{ borderRadius: '50%', objectFit: 'cover' }}
       onError={() => setFailed(true)}
     />
   );
