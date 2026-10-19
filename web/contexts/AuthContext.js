@@ -68,7 +68,9 @@ async function ensurePlayerDoc(db, user, displayName) {
     // and the stored name is still the placeholder, update it.
     const existing = snap.data();
     const realName = displayName || user.displayName;
-    if (realName && existing.displayName === 'Wanderer' && realName !== 'Wanderer') {
+    // Always update displayName if we have a real name and stored name differs.
+    // This fixes docs created with 'Wanderer' placeholder or email prefix.
+    if (realName && realName !== 'Wanderer' && existing.displayName !== realName) {
       try {
         const { updateDoc } = await import('firebase/firestore');
         await updateDoc(ref, { displayName: realName, updatedAt: serverTimestamp() });
@@ -141,7 +143,7 @@ export function AuthProvider({ children }) {
                       'Content-Type': 'application/json',
                       Authorization: `Bearer ${token}`,
                     },
-                    body: JSON.stringify({ code: refCode }),
+                    body: JSON.stringify({ code: refCode, displayName: dn }),
                   });
                   const data = await res.json().catch(() => ({}));
                   if (res.ok && data.ok) break; // Success - stop retrying
