@@ -103,7 +103,7 @@ async function grantReferralEarning(tx, referredUid, earnedPetals, source, now) 
  * @param {number} now - Timestamp
  * @returns {object} { ok, error?, referrerUid?, bonus? }
  */
-async function claimReferralBonus(tx, newUid, code, now) {
+async function claimReferralBonus(tx, newUid, code, now, displayName) {
   console.log(`[claimReferralBonus] newUid=${newUid} code=${code}`);
   if (!code || typeof code !== 'string') {
     console.log(`[claimReferralBonus] invalid_code: code=${code}`);
@@ -135,7 +135,7 @@ async function claimReferralBonus(tx, newUid, code, now) {
     console.log(`[claimReferralBonus] will create minimal player doc for ${newUid}`);
     needsCreate = true;
     newUserData = {
-      displayName: 'Wanderer',
+      displayName: displayName || 'Wanderer',
       email: '',
       petals: 20,
       level: 1,
@@ -187,7 +187,7 @@ async function claimReferralBonus(tx, newUid, code, now) {
   tx.set(relRef, {
     referrerUid,
     referredUid: newUid,
-    referredName: newUserData.displayName || 'Wanderer',
+    referredName: displayName || newUserData.displayName || 'Wanderer',
     totalEarned: 0,
     createdAt: now,
     updatedAt: now,
