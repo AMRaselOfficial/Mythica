@@ -12,6 +12,7 @@ const { activityEntry } = require('../lib/activity');
 const contentApi = require('../lib/content');
 const { validateList, validatePurchase } = require('../lib/game');
 const { syncBestWeaponPower } = require('../lib/leaderboard');
+const { grantReferralEarning } = require('../lib/referral');
 
 const router = express.Router();
 
@@ -119,6 +120,15 @@ router.post('/market/purchase', async (req, res) => {
         tx.update(sellerRef, { petals: (sSnap.data().petals ?? 0) + listing.price, updatedAt: now });
       } else {
         tx.set(sellerRef, { ...newPlayer(now), petals: contentApi.startingPetals() + listing.price });
+      }
+
+      // Referral: give 10% of sale price to seller's referrer (if any)
+      if (listing.price > 0) {
+        try {
+          await grantReferralEarning(tx, listing.sellerUid, listing.price, 'marketplace', now);
+        } catch (e) {
+          console.error('Referral earning failed (marketplace):', e.message);
+        }
       }
 
       if (iSnap.exists) {
