@@ -1648,3 +1648,26 @@ input:-webkit-autofill:focus {
   flex-direction: column;
   height: 100%;
 }
+
+/* Fix: Inventory filter chips match input height */
+.toolbar .chip {
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 1rem;
+  box-sizing: border-box;
+}
+
+/* Fix: Event medals — prevent bad wrapping */
+.event-medals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+.event-medals span {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
