@@ -56,6 +56,7 @@ export default function LoginPage() {
             <input
               id="password"
               className="input"
+              style={{ background: '#0d1226', border: '1px solid var(--line)', color: 'var(--ink)' }}
               type="password"
               autoComplete="current-password"
               required
