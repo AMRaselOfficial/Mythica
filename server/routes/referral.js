@@ -15,17 +15,19 @@ const router = express.Router();
 router.post('/referral/claim', async (req, res) => {
   const uid = req.uid;
   const { code } = req.body || {};
+  console.log(`[REFERRAL CLAIM] uid=${uid} code=${code}`);
   try {
     const out = await db.runTransaction(async (tx) => {
       const now = Date.now();
       return await claimReferralBonus(tx, uid, code, now);
     });
+    console.log(`[REFERRAL CLAIM] result for uid=${uid} code=${code}:`, JSON.stringify(out));
     if (!out.ok) {
       return res.status(400).json({ ok: false, error: out.error });
     }
     return res.json({ ok: true, bonus: out.bonus, referrerUid: out.referrerUid });
   } catch (e) {
-    console.error('POST /api/referral/claim failed:', e);
+    console.error('[REFERRAL CLAIM] failed:', e);
     return res.status(500).json({ ok: false, error: 'server_error' });
   }
 });
