@@ -35,7 +35,7 @@ export const metadata = {
     locale: 'en_US',
     images: [
       {
-        url: 'https://mythica.bond/assets/logo/mythica-logo.webp',
+        url: 'https://mythica.bond/assets/logo/mythica-logo.png',
         width: 1200,
         height: 630,
         alt: 'Mythica — Dark-Fantasy Collection & Adventure Game',
@@ -47,7 +47,7 @@ export const metadata = {
     title: 'Mythica — A Dark-Fantasy Collection & Adventure Game',
     description:
       'Hunt the night wilds, collect sprites and weapons, trade with fellow travelers, and rise through the dark fantasy realm of Mythica. Free to play.',
-    images: ['https://mythica.bond/assets/logo/mythica-logo.webp'],
+    images: ['https://mythica.bond/assets/logo/mythica-logo.png'],
   },
   robots: {
     index: true,
