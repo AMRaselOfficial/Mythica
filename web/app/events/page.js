@@ -100,8 +100,9 @@ function EventCard({ event: ev, onJoin, onClaim, busy }) {
             <>
               <br />
               <strong>Medals:</strong>{' '}
+              <span className="event-medals">
               {(ev.medals || []).map((m, i) => (
-                <span key={i} style={{ marginRight: '0.5rem' }}>
+                <span key={i}>
                   <Icon
                     name="trophy"
                     size="0.9rem"
@@ -113,6 +114,7 @@ function EventCard({ event: ev, onJoin, onClaim, busy }) {
                   {m.name}
                 </span>
               ))}
+              </span>
             </>
           )}
         </p>
