@@ -14,6 +14,7 @@ const { generateUniqueCode } = require('../lib/playerCode');
 const { bumpHuntEventProgress } = require('../lib/events');
 const { newPlayerEmailError } = require('../lib/emailProviders');
 const { syncBestWeaponPower } = require('../lib/leaderboard');
+const { grantReferralEarning } = require('../lib/referral');
 const {
   readEarned,
   grantNewlyEarned,
@@ -193,6 +194,15 @@ router.post('/hunt', async (req, res) => {
       );
       // Preserve a level-up from the hunt XP itself.
       final.leveledUp = applied.leveledUp || final.leveledUp;
+
+      // Referral: give 10% of hunt petals to referrer (if any)
+      if (roll.petalsFound > 0) {
+        try {
+          await grantReferralEarning(tx, uid, roll.petalsFound, 'hunt', now);
+        } catch (e) {
+          console.error('Referral earning failed (hunt):', e.message);
+        }
+      }
 
       const playerUpdate = {
         lastHuntAt: now,
