@@ -150,28 +150,6 @@ function SettingsInner() {
         </div>
       )}
 
-      <div className="card" style={{ marginBottom: '1.25rem' }}>
-        <h2 className="serif" style={{ marginTop: 0 }}>
-          Traveler
-        </h2>
-        <form onSubmit={saveName}>
-          <div className="field">
-            <label htmlFor="displayName">Display name</label>
-            <input
-              id="displayName"
-              className="input"
-              type="text"
-              maxLength={40}
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-            />
-          </div>
-          <button className="btn btn-primary btn-sm" type="submit" disabled={busy}>
-            {busy ? 'Saving…' : 'Save Name'}
-          </button>
-        </form>
-      </div>
-
       <div className="card">
         <h2 className="serif" style={{ marginTop: 0 }}>
           Sound
