@@ -3,26 +3,33 @@
  * Referral system helpers.
  * - Referral code = playerCode (traveler code)
  * - New user enters code at signup → gets 50 petals, linked to referrer
- * - Referrer gets 10% of referred player's earnings from:
- *   - Hunt petals
- *   - Marketplace sales
+ * - Referrer gets 10 petals for every 100 petals the referred player earns
+ *   from hunts + marketplace (cumulative, threshold-based).
+ *   Example: referred earns 100 total → referrer gets 10.
+ *   Referred earns 200 total → referrer gets another 10.
+ *   Based on cumulative earnings, NOT current balance.
  * - NOT from events, redeem codes, or trades (trades are item swaps, no petals)
  */
 const { db, USE_FAKE } = require('./db');
 const { uidByCode } = require('./playerCode');
 
 const REFERRAL_BONUS = 50; // Petals new user gets for using a code
-const REFERRAL_RATE = 0.10; // 10% of earnings
+const REFERRAL_THRESHOLD = 100; // Petals referred must earn (cumulative) per payout
+const REFERRAL_PAYOUT = 10; // Petals referrer gets per threshold crossed (10% of 100)
 
 /**
  * Grant referral earnings to the referrer.
- * Called after a referred player earns petals from hunt or marketplace.
+ * Threshold-based: every time the referred player's CUMULATIVE earnings
+ * (hunts + marketplace) cross a multiple of 100, referrer gets 10 petals.
+ * Example: referred earns 100 total → referrer gets 10.
+ *          referred earns 250 total → referrer has 20 (next payout at 300).
+ * Based on cumulative earnings, NOT current balance.
  * @param {object} tx - Firestore transaction
  * @param {string} referredUid - UID of the player who earned
  * @param {number} earnedPetals - Petals earned by the referred player
  * @param {string} source - 'hunt' | 'marketplace'
  * @param {number} now - Timestamp
- * @returns {number} Petals granted to referrer (0 if no referrer or no earnings)
+ * @returns {number} Petals granted to referrer (0 if threshold not crossed)
  */
 async function grantReferralEarning(tx, referredUid, earnedPetals, source, now) {
   if (!earnedPetals || earnedPetals <= 0) return 0;
@@ -36,9 +43,30 @@ async function grantReferralEarning(tx, referredUid, earnedPetals, source, now) 
   const referrerUid = referredData.referredBy;
   if (!referrerUid) return 0;
 
-  // Calculate 10% (rounded down, min 1 if earned > 0)
-  const bonus = Math.floor(earnedPetals * REFERRAL_RATE);
-  if (bonus <= 0) return 0;
+  // Get referral relationship doc
+  const relId = `${referrerUid}_${referredUid}`;
+  const relRef = db.collection('referrals').doc(relId);
+  const relSnap = await tx.get(relRef);
+  if (!relSnap.exists) return 0;
+
+  const relData = relSnap.data();
+  const prevTotal = relData.totalEarned || 0;
+  const newTotal = prevTotal + earnedPetals;
+  const prevThresholds = Math.floor(prevTotal / REFERRAL_THRESHOLD);
+  const newThresholds = Math.floor(newTotal / REFERRAL_THRESHOLD);
+
+  // Update total earned (always, even if no payout yet)
+  tx.update(relRef, {
+    totalEarned: newTotal,
+    updatedAt: now,
+  });
+
+  // No new threshold crossed → no payout yet
+  if (newThresholds <= prevThresholds) return 0;
+
+  // Calculate payout: 10 petals per new threshold crossed
+  const thresholdsCrossed = newThresholds - prevThresholds;
+  const bonus = thresholdsCrossed * REFERRAL_PAYOUT;
 
   // Grant to referrer
   const referrerRef = db.collection('players').doc(referrerUid);
@@ -51,17 +79,6 @@ async function grantReferralEarning(tx, referredUid, earnedPetals, source, now) 
     referralEarnings: (referrerData.referralEarnings || 0) + bonus,
     updatedAt: now,
   });
-
-  // Update referral relationship doc
-  const relId = `${referrerUid}_${referredUid}`;
-  const relRef = db.collection('referrals').doc(relId);
-  const relSnap = await tx.get(relRef);
-  if (relSnap.exists) {
-    tx.update(relRef, {
-      totalEarned: (relSnap.data().totalEarned || 0) + bonus,
-      updatedAt: now,
-    });
-  }
 
   // Log the earning event
   const logRef = db.collection('referralEarnings').doc();
@@ -144,7 +161,8 @@ async function claimReferralBonus(tx, newUid, code, now) {
 
 module.exports = {
   REFERRAL_BONUS,
-  REFERRAL_RATE,
+  REFERRAL_THRESHOLD,
+  REFERRAL_PAYOUT,
   grantReferralEarning,
   claimReferralBonus,
 };
