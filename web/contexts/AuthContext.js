@@ -91,6 +91,7 @@ export function AuthProvider({ children }) {
   // doing so races Firestore's auth propagation and caused spurious
   // "Missing or insufficient permissions" errors.)
   const pendingDisplayName = useRef(null);
+  const pendingReferralCode = useRef(null);
 
   useEffect(() => {
     if (!configured) {
@@ -106,6 +107,27 @@ export function AuthProvider({ children }) {
           const dn = pendingDisplayName.current || undefined;
           pendingDisplayName.current = null;
           await ensurePlayerDoc(fb.db, u, dn);
+          // Claim referral bonus if code was entered at signup
+          const refCode = pendingReferralCode.current;
+          pendingReferralCode.current = null;
+          if (refCode) {
+            try {
+              const token = await u.getIdToken();
+              const apiUrl = getApiUrl();
+              if (apiUrl && token) {
+                await fetch(`${apiUrl}/api/referral/claim`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({ code: refCode }),
+                });
+              }
+            } catch {
+              /* non-fatal: referral claim failed, user still signed up */
+            }
+          }
         } catch (e) {
           setAuthError('Could not load your traveler record.');
         }
@@ -144,9 +166,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signup = useCallback(
-    async (email, password, displayName) => {
+    async (email, password, displayName, referralCode) => {
       const fb = getFirebase();
       if (displayName) pendingDisplayName.current = displayName;
+      if (referralCode) pendingReferralCode.current = referralCode;
       const cred = await createUserWithEmailAndPassword(fb.auth, email, password);
       if (displayName) {
         try {
