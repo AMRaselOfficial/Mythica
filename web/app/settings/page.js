@@ -240,6 +240,7 @@ function SettingsInner() {
             <input
               id="oldPw"
               className="input"
+              style={{ background: '#0d1226', border: '1px solid var(--line)', color: 'var(--ink)' }}
               type="password"
               autoComplete="current-password"
               value={oldPw}
@@ -251,6 +252,7 @@ function SettingsInner() {
             <input
               id="newPw"
               className="input"
+              style={{ background: '#0d1226', border: '1px solid var(--line)', color: 'var(--ink)' }}
               type="password"
               autoComplete="new-password"
               minLength={6}
@@ -263,6 +265,7 @@ function SettingsInner() {
             <input
               id="confirmPw"
               className="input"
+              style={{ background: '#0d1226', border: '1px solid var(--line)', color: 'var(--ink)' }}
               type="password"
               autoComplete="new-password"
               minLength={6}
