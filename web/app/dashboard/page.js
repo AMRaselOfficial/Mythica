@@ -72,7 +72,7 @@ function DashboardInner() {
           <div className="label">Level</div>
           <div className="value">{player?.level ?? 1}</div>
         </div>
-        <div className="stat" style={{ flex: 1, minWidth: '200px' }}>
+        <div className="stat">
           <div className="label">
             XP — {player?.xp ?? 0} / {pct?.need ?? '—'}
           </div>
