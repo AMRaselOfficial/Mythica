@@ -68,9 +68,17 @@ function ProfileInner() {
   const sprites = (inv || []).filter((r) => itemById(r.itemId)?.type === 'sprite').length;
   const weapons = (inv || []).filter((r) => itemById(r.itemId)?.type === 'weapon').length;
   const favorite = player?.favoriteItemId ? itemById(player.favoriteItemId) : null;
-  const joined = player?.createdAt && typeof player.createdAt.toMillis === 'function'
-    ? new Date(player.createdAt.toMillis()).toLocaleDateString()
-    : '—';
+  // createdAt can be: Firestore Timestamp (has .toMillis), a number (ms since
+  // epoch, from server-created docs), or a {seconds} object. Handle all.
+  const joined = (() => {
+    const c = player?.createdAt;
+    if (!c) return '—';
+    if (typeof c.toMillis === 'function') return new Date(c.toMillis()).toLocaleDateString();
+    if (typeof c === 'number') return new Date(c).toLocaleDateString();
+    if (typeof c.seconds === 'number') return new Date(c.seconds * 1000).toLocaleDateString();
+    if (c._seconds) return new Date(c._seconds * 1000).toLocaleDateString();
+    return '—';
+  })();
 
   return (
     <div className="page">
