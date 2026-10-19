@@ -62,7 +62,21 @@ async function ensurePlayerDoc(db, user, displayName) {
     } catch {
       /* non-fatal: the code will be generated on the first hunt instead */
     }
-  } else if (!snap.data()?.playerCode) {
+  } else {
+    // Doc exists (may have been created by server during referral claim with
+    // placeholder name 'Wanderer'). If we have a real displayName from signup
+    // and the stored name is still the placeholder, update it.
+    const existing = snap.data();
+    const realName = displayName || user.displayName;
+    if (realName && existing.displayName === 'Wanderer' && realName !== 'Wanderer') {
+      try {
+        const { updateDoc } = await import('firebase/firestore');
+        await updateDoc(ref, { displayName: realName, updatedAt: serverTimestamp() });
+      } catch {
+        /* non-fatal: name will be updated on next load */
+      }
+    }
+    if (!existing.playerCode) {
     // Older accounts created before the traveler-code feature (or ones that
     // missed it) get a code now. Same server call as above.
     try {
