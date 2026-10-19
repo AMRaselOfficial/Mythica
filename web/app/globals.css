@@ -1676,3 +1676,26 @@ input:-webkit-autofill:focus {
   align-items: center;
   gap: 0.25rem;
 }
+
+/* Nav: Always use hamburger for logged-in users — 13 links don't fit in one row */
+.nav-links {
+  display: none !important;
+}
+.nav-links.open {
+  display: flex !important;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.5rem;
+  z-index: 100;
+  box-shadow: var(--shadow);
+}
+.nav-toggle {
+  display: inline-flex !important;
+}
