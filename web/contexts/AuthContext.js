@@ -108,24 +108,40 @@ export function AuthProvider({ children }) {
           pendingDisplayName.current = null;
           await ensurePlayerDoc(fb.db, u, dn);
           // Claim referral bonus if code was entered at signup
+          // Retry up to 3 times with delay - the player doc may not be
+          // fully propagated when the auth listener first fires.
           const refCode = pendingReferralCode.current;
           pendingReferralCode.current = null;
           if (refCode) {
-            try {
-              const token = await u.getIdToken();
-              const apiUrl = getApiUrl();
-              if (apiUrl && token) {
-                await fetch(`${apiUrl}/api/referral/claim`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
-                  },
-                  body: JSON.stringify({ code: refCode }),
-                });
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                if (attempt > 0) {
+                  await new Promise((r) => setTimeout(r, 1500 * attempt));
+                }
+                const token = await u.getIdToken();
+                const apiUrl = getApiUrl();
+                if (apiUrl && token) {
+                  const res = await fetch(`${apiUrl}/api/referral/claim`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ code: refCode }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (res.ok && data.ok) break; // Success - stop retrying
+                  // If code not found or already claimed, don't retry
+                  if (data.error === 'code_not_found' || data.error === 'already_claimed' || data.error === 'self_referral') break;
+                  // Otherwise (player_not_found, server_error), retry
+                  if (attempt === 2) break;
+                } else {
+                  break;
+                }
+              } catch {
+                // Network error - retry unless this was the last attempt
+                if (attempt === 2) break;
               }
-            } catch {
-              /* non-fatal: referral claim failed, user still signed up */
             }
           }
         } catch (e) {
