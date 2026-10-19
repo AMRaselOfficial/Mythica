@@ -18,6 +18,7 @@ const LINKS = [
   { href: '/events', label: 'Events' },
   { href: '/leaderboard', label: 'Leaderboard' },
   { href: '/withdraw', label: 'Withdraw' },
+  { href: '/referral', label: 'Referral' },
   { href: '/profile', label: 'Profile' },
   { href: '/support', label: 'Support' },
   { href: '/settings', label: 'Settings' },
