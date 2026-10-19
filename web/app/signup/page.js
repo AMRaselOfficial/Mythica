@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext.js';
 import { link } from '../../lib/paths.js';
 import { sfx } from '../../lib/audio.js';
 import { getFirebase, getApiUrl } from '../../lib/firebase.js';
+import { doc, getDoc } from 'firebase/firestore';
 import { ErrorNotice } from '../components/ui.js';
 import { friendlyAuthError } from '../login/page.js';
 import { isAllowedEmail, PROVIDER_HINT } from '../../lib/emailProviders.js';
@@ -41,15 +42,27 @@ export default function SignupPage() {
     setBusy(true);
     try {
       await signup(cleanEmail, password, displayName.trim(), referralCode.trim());
-      // Claim referral bonus directly (with retries) - the AuthContext
-      // listener also tries, but this ensures the claim happens in the
-      // signup flow itself, not in a background listener that can race.
+      // Claim referral bonus: wait for player doc to exist first, then claim.
+      // The player doc is created by AuthContext's ensurePlayerDoc (async).
+      // If we claim before it exists, server returns player_not_found.
       const code = referralCode.trim().toUpperCase();
       if (code) {
+        const fb = getFirebase();
+        const uid = fb.auth.currentUser?.uid;
+        // Poll for player doc (up to 15s) - it must exist before claim works
+        if (uid && fb.db) {
+          for (let i = 0; i < 15; i++) {
+            try {
+              const snap = await getDoc(doc(fb.db, 'players', uid));
+              if (snap.exists()) break;
+            } catch { /* ignore, keep polling */ }
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
+        // Now claim with retries
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
-            const fb = getFirebase();
             const token = await fb.auth.currentUser?.getIdToken();
             const apiUrl = getApiUrl();
             if (!apiUrl || !token) break;
