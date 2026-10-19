@@ -69,7 +69,7 @@ export default function SignupPage() {
             const res = await fetch(`${apiUrl}/api/referral/claim`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ code }),
+              body: JSON.stringify({ code, displayName: displayName.trim() }),
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok && data.ok) break;
