@@ -141,7 +141,7 @@ function LogoMark() {
   if (failed) return <span className="brand-mark"><Icon name="moon" /></span>;
   return (
     <img
-      src={asset('assets/logo/mythica-logo.webp')}
+      src={asset('assets/logo/mythica-logo.png')}
       alt=""
       aria-hidden="true"
       width={34}
