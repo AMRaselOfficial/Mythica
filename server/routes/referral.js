@@ -58,11 +58,30 @@ router.get('/referral/stats', async (req, res) => {
       referrals = snap.docs.map((d) => d.data());
     }
 
+    // Fetch current displayNames for referred players (referral doc may have
+    // stale 'Wanderer' if server created minimal player doc before client
+    // set the real name at signup)
+    const nameMap = {};
+    for (const r of referrals) {
+      if (!nameMap[r.referredUid]) {
+        try {
+          const pSnap = await db.collection('players').doc(r.referredUid).get();
+          if (pSnap.exists) {
+            nameMap[r.referredUid] = pSnap.data().displayName || r.referredName || 'Wanderer';
+          } else {
+            nameMap[r.referredUid] = r.referredName || 'Wanderer';
+          }
+        } catch {
+          nameMap[r.referredUid] = r.referredName || 'Wanderer';
+        }
+      }
+    }
+
     // Sort by createdAt desc for latest 10
     const sortedByDate = [...referrals].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     const latest10 = sortedByDate.slice(0, 10).map((r) => ({
       referredUid: r.referredUid,
-      referredName: r.referredName || 'Wanderer',
+      referredName: nameMap[r.referredUid] || 'Wanderer',
       totalEarned: r.totalEarned || 0,
       createdAt: r.createdAt || 0,
     }));
@@ -71,7 +90,7 @@ router.get('/referral/stats', async (req, res) => {
     const sortedByEarnings = [...referrals].sort((a, b) => (b.totalEarned || 0) - (a.totalEarned || 0));
     const top10 = sortedByEarnings.slice(0, 10).map((r) => ({
       referredUid: r.referredUid,
-      referredName: r.referredName || 'Wanderer',
+      referredName: nameMap[r.referredUid] || 'Wanderer',
       totalEarned: r.totalEarned || 0,
       createdAt: r.createdAt || 0,
     }));
