@@ -225,7 +225,7 @@ function HuntInner() {
       </p>
 
       {equippedInfo && (
-        <div className="card" style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div className="card" style={{ marginTop: '1rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span style={{ color: 'var(--gold-soft)' }}><Icon name="sword" size="1.6rem" /></span>
           <div>
             <div style={{ fontWeight: 600 }}>
