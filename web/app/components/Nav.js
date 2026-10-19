@@ -87,6 +87,7 @@ export default function Nav() {
           <button
             type="button"
             className="nav-toggle"
+            style={{ display: 'inline-flex' }}
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={menuOpen}
             onClick={toggleMenu}
