@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { link } from '../../lib/paths.js';
 import { sfx } from '../../lib/audio.js';
+import { getFirebase, getApiUrl } from '../../lib/firebase.js';
 import { ErrorNotice } from '../components/ui.js';
 import { friendlyAuthError } from '../login/page.js';
 import { isAllowedEmail, PROVIDER_HINT } from '../../lib/emailProviders.js';
@@ -40,6 +41,32 @@ export default function SignupPage() {
     setBusy(true);
     try {
       await signup(cleanEmail, password, displayName.trim(), referralCode.trim());
+      // Claim referral bonus directly (with retries) - the AuthContext
+      // listener also tries, but this ensures the claim happens in the
+      // signup flow itself, not in a background listener that can race.
+      const code = referralCode.trim().toUpperCase();
+      if (code) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+            const fb = getFirebase();
+            const token = await fb.auth.currentUser?.getIdToken();
+            const apiUrl = getApiUrl();
+            if (!apiUrl || !token) break;
+            const res = await fetch(`${apiUrl}/api/referral/claim`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ code }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok && data.ok) break;
+            if (data.error === 'code_not_found' || data.error === 'already_claimed' || data.error === 'self_referral') break;
+            if (attempt === 2) break;
+          } catch {
+            if (attempt === 2) break;
+          }
+        }
+      }
       sfx.levelup();
       router.push('/dashboard');
     } catch (err) {
