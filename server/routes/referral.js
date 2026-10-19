@@ -58,11 +58,19 @@ router.get('/referral/stats', async (req, res) => {
       referrals = snap.docs.map((d) => d.data());
     }
 
-    // Fetch current displayNames (referral doc has name at claim time,
-    // which is now correct since claim receives displayName from signup)
+    // Fetch CURRENT displayNames from player docs (not stored referral name,
+    // which may be stale 'Wanderer' for accounts created before the fix)
     const nameMap = {};
     for (const r of referrals) {
-      nameMap[r.referredUid] = r.referredName || 'Wanderer';
+      let name = r.referredName || 'Wanderer';
+      try {
+        const pSnap = await db.collection('players').doc(r.referredUid).get();
+        if (pSnap.exists) {
+          const docName = pSnap.data().displayName;
+          if (docName && docName !== 'Wanderer') name = docName;
+        }
+      } catch { /* ignore, use stored name */ }
+      nameMap[r.referredUid] = name;
     }
 
     // Sort by createdAt desc for latest 10
