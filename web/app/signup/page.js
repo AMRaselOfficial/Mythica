@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext.js';
 import { link } from '../../lib/paths.js';
 import { sfx } from '../../lib/audio.js';
@@ -11,7 +11,6 @@ import { isAllowedEmail, PROVIDER_HINT } from '../../lib/emailProviders.js';
 export default function SignupPage() {
   const { signup, configured } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,9 +19,11 @@ export default function SignupPage() {
 
   // Pre-fill referral code from ?r= URL param (e.g. /signup?r=J9MDNY)
   useEffect(() => {
-    const code = searchParams?.get('r');
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('r');
     if (code) setReferralCode(code.trim().toUpperCase().slice(0, 6));
-  }, [searchParams]);
+  }, []);
   const [error, setError] = useState('');
 
   const submit = async (e) => {
