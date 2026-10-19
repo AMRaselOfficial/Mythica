@@ -54,6 +54,7 @@ app.use(
   require('./routes/leaderboard'),
   require('./routes/withdraw'),
   require('./routes/notifications'),
+  require('./routes/referral'),
   require('./routes/admin')
 );
 
