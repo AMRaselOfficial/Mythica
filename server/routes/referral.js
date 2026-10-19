@@ -14,12 +14,12 @@ const router = express.Router();
 // Claim referral bonus (new user enters code)
 router.post('/referral/claim', async (req, res) => {
   const uid = req.uid;
-  const { code } = req.body || {};
-  console.log(`[REFERRAL CLAIM] uid=${uid} code=${code}`);
+  const { code, displayName } = req.body || {};
+  console.log(`[REFERRAL CLAIM] uid=${uid} code=${code} displayName=${displayName}`);
   try {
     const out = await db.runTransaction(async (tx) => {
       const now = Date.now();
-      return await claimReferralBonus(tx, uid, code, now);
+      return await claimReferralBonus(tx, uid, code, now, displayName);
     });
     console.log(`[REFERRAL CLAIM] result for uid=${uid} code=${code}:`, JSON.stringify(out));
     if (!out.ok) {
@@ -58,23 +58,11 @@ router.get('/referral/stats', async (req, res) => {
       referrals = snap.docs.map((d) => d.data());
     }
 
-    // Fetch current displayNames for referred players (referral doc may have
-    // stale 'Wanderer' if server created minimal player doc before client
-    // set the real name at signup)
+    // Fetch current displayNames (referral doc has name at claim time,
+    // which is now correct since claim receives displayName from signup)
     const nameMap = {};
     for (const r of referrals) {
-      if (!nameMap[r.referredUid]) {
-        try {
-          const pSnap = await db.collection('players').doc(r.referredUid).get();
-          if (pSnap.exists) {
-            nameMap[r.referredUid] = pSnap.data().displayName || r.referredName || 'Wanderer';
-          } else {
-            nameMap[r.referredUid] = r.referredName || 'Wanderer';
-          }
-        } catch {
-          nameMap[r.referredUid] = r.referredName || 'Wanderer';
-        }
-      }
+      nameMap[r.referredUid] = r.referredName || 'Wanderer';
     }
 
     // Sort by createdAt desc for latest 10
