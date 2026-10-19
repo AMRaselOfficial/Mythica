@@ -118,17 +118,22 @@ async function claimReferralBonus(tx, newUid, code, now) {
   if (!referrerUid) return { ok: false, error: 'code_not_found' };
   if (referrerUid === newUid) return { ok: false, error: 'self_referral' };
 
-  // Get or create new user's player doc.
-  // The client creates the doc async via AuthContext, but the claim can
-  // race ahead of it. If the doc doesn't exist yet, create a minimal one
-  // here - the client will fill in displayName/email/etc. on next load.
-  // This is the root fix for player_not_found on referral claims.
+  // ALL READS FIRST (Firestore requires reads before writes in a transaction)
   const newUserRef = db.collection('players').doc(newUid);
-  let newUserSnap = await tx.get(newUserRef);
-  console.log(`[claimReferralBonus] newUser exists=${newUserSnap.exists}`);
+  const referrerRef = db.collection('players').doc(referrerUid);
+  const newUserSnap = await tx.get(newUserRef);
+  const referrerSnap = await tx.get(referrerRef);
+  console.log(`[claimReferralBonus] newUser exists=${newUserSnap.exists} referrer exists=${referrerSnap.exists}`);
+
+  if (!referrerSnap.exists) return { ok: false, error: 'referrer_not_found' };
+
+  // Determine new user data (create minimal doc if missing - client creates
+  // doc async via AuthContext, but claim can race ahead of it)
   let newUserData;
+  let needsCreate = false;
   if (!newUserSnap.exists) {
-    console.log(`[claimReferralBonus] creating minimal player doc for ${newUid}`);
+    console.log(`[claimReferralBonus] will create minimal player doc for ${newUid}`);
+    needsCreate = true;
     newUserData = {
       displayName: 'Wanderer',
       email: '',
@@ -142,7 +147,6 @@ async function claimReferralBonus(tx, newUid, code, now) {
       sfxEnabled: true,
       accountStatus: 'active',
     };
-    tx.set(newUserRef, newUserData);
   } else {
     newUserData = newUserSnap.data();
   }
@@ -150,18 +154,25 @@ async function claimReferralBonus(tx, newUid, code, now) {
   if (newUserData.referredBy) return { ok: false, error: 'already_claimed' };
   if (newUserData.referralClaimed) return { ok: false, error: 'already_claimed' };
 
-  // Check referrer exists
-  const referrerRef = db.collection('players').doc(referrerUid);
-  const referrerSnap = await tx.get(referrerRef);
-  if (!referrerSnap.exists) return { ok: false, error: 'referrer_not_found' };
-
-  // Grant 50 petals to new user
-  tx.update(newUserRef, {
-    petals: (newUserData.petals || 0) + REFERRAL_BONUS,
-    referredBy: referrerUid,
-    referralClaimed: true,
-    updatedAt: now,
-  });
+  // ALL WRITES AFTER READS
+  if (needsCreate) {
+    // Create doc with bonus already applied (single set, not set+update)
+    tx.set(newUserRef, {
+      ...newUserData,
+      petals: (newUserData.petals || 0) + REFERRAL_BONUS,
+      referredBy: referrerUid,
+      referralClaimed: true,
+      updatedAt: now,
+    });
+  } else {
+    // Grant 50 petals to existing user
+    tx.update(newUserRef, {
+      petals: (newUserData.petals || 0) + REFERRAL_BONUS,
+      referredBy: referrerUid,
+      referralClaimed: true,
+      updatedAt: now,
+    });
+  }
 
   // Increment referrer's count
   const referrerData = referrerSnap.data();
