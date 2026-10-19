@@ -91,8 +91,9 @@ async function ensurePlayerDoc(db, user, displayName) {
     } catch {
       /* non-fatal: the code will be generated on the first hunt instead */
     }
-  }
-}
+    } // close if (!existing.playerCode)
+  } // close else
+} // close ensurePlayerDoc
 
 export function AuthProvider({ children }) {
   const configured = isConfigured();
