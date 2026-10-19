@@ -35,7 +35,7 @@ export default function LandingPage() {
         {logoOk ? (
           <img
             className="hero-logo"
-            src={asset('assets/logo/mythica-logo.webp')}
+            src={asset('assets/logo/mythica-logo.png')}
             alt="Mythica emblem"
             onError={() => setLogoOk(false)}
           />
