@@ -32,19 +32,15 @@ export default function LandingPage() {
   return (
     <div className="page">
       <section className="hero">
-        {logoOk ? (
-          <img
-            className="hero-logo"
-            src={asset('assets/logo/mythica-logo.png')}
-            alt="Mythica emblem"
-            onError={() => setLogoOk(false)}
-          />
-        ) : (
-          <div style={{ color: 'var(--gold-soft, #d8b36a)' }} aria-hidden="true">
-            <BigIcon name="moon" size="3.5rem" />
-          </div>
-        )}
-        <h1>Mythica</h1>
+        <h1
+          style={{
+            textShadow:
+              '0 0 20px rgba(216, 179, 106, 0.8), 0 0 40px rgba(216, 179, 106, 0.5), 0 0 60px rgba(216, 179, 106, 0.3), 0 0 80px rgba(216, 179, 106, 0.2)',
+            animation: 'mythicaGlow 3s ease-in-out infinite alternate',
+          }}
+        >
+          Mythica
+        </h1>
         <p className="tagline">
           The night wilds are waking. Hunt for sprites and weapons, grow your collection, trade with
           fellow travelers, and carve your legend into the dark.
