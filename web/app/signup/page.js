@@ -14,6 +14,7 @@ export default function SignupPage() {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -30,7 +31,7 @@ export default function SignupPage() {
     }
     setBusy(true);
     try {
-      await signup(cleanEmail, password, displayName.trim());
+      await signup(cleanEmail, password, displayName.trim(), referralCode.trim());
       sfx.levelup();
       router.push('/dashboard');
     } catch (err) {
@@ -92,6 +93,23 @@ export default function SignupPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
+          </div>
+          <div className="field">
+            <label htmlFor="referralCode">Invitation code (optional)</label>
+            <input
+              id="referralCode"
+              className="input"
+              type="text"
+              autoComplete="off"
+              maxLength={6}
+              value={referralCode}
+              onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+              placeholder="e.g. X8BL09"
+              style={{ textTransform: 'uppercase' }}
+            />
+            <p style={{ color: 'var(--ink-dim)', fontSize: '0.85rem', marginTop: '0.25rem', marginBottom: 0 }}>
+              Enter a friend's code to get <strong style={{ color: 'var(--gold-soft)' }}>50 petals free</strong>.
+            </p>
           </div>
           {error && <ErrorNotice message={error} />}
           <button className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%' }}>
