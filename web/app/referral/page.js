@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext.js';
-import { apiFetch } from '../../lib/api.js';
+import { api } from '../../lib/api.js';
 import { Icon } from '../components/icons.js';
 import { LoadingBlock, EmptyState, ErrorNotice } from '../components/ui.js';
 import TravelerModal from '../components/TravelerModal.js';
@@ -18,7 +18,7 @@ export default function ReferralPage() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await apiFetch('/api/referral/stats');
+        const data = await api.referralStats();
         if (!cancelled) setStats(data);
       } catch (e) {
         if (!cancelled) setError('Could not load referral stats.');
@@ -50,7 +50,7 @@ export default function ReferralPage() {
 
   const openTraveler = async (uid) => {
     try {
-      const data = await apiFetch(`/api/players/${uid}`);
+      const data = await api.playerByUid(uid);
       if (data?.player) setSelectedTraveler(data.player);
     } catch {
       /* ignore */
