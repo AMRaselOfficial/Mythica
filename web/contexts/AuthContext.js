@@ -9,7 +9,7 @@ import {
   signOut,
   updateProfile,
 } from 'firebase/auth';
-import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { getFirebase, getApiUrl, isConfigured } from '../lib/firebase.js';
 import { onAccountBanned } from '../lib/api.js';
 import { link } from '../lib/paths.js';
@@ -72,7 +72,6 @@ async function ensurePlayerDoc(db, user, displayName) {
     // This fixes docs created with 'Wanderer' placeholder or email prefix.
     if (realName && realName !== 'Wanderer' && existing.displayName !== realName) {
       try {
-        const { updateDoc } = await import('firebase/firestore');
         await updateDoc(ref, { displayName: realName, updatedAt: serverTimestamp() });
       } catch {
         /* non-fatal: name will be updated on next load */
