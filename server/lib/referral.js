@@ -104,7 +104,9 @@ async function grantReferralEarning(tx, referredUid, earnedPetals, source, now) 
  * @returns {object} { ok, error?, referrerUid?, bonus? }
  */
 async function claimReferralBonus(tx, newUid, code, now) {
+  console.log(`[claimReferralBonus] newUid=${newUid} code=${code}`);
   if (!code || typeof code !== 'string') {
+    console.log(`[claimReferralBonus] invalid_code: code=${code}`);
     return { ok: false, error: 'invalid_code' };
   }
   const cleanCode = code.trim().toUpperCase();
@@ -112,12 +114,14 @@ async function claimReferralBonus(tx, newUid, code, now) {
 
   // Find referrer by code
   const referrerUid = await uidByCode(cleanCode);
+  console.log(`[claimReferralBonus] uidByCode(${cleanCode}) = ${referrerUid}`);
   if (!referrerUid) return { ok: false, error: 'code_not_found' };
   if (referrerUid === newUid) return { ok: false, error: 'self_referral' };
 
   // Check new user hasn't already claimed
   const newUserRef = db.collection('players').doc(newUid);
   const newUserSnap = await tx.get(newUserRef);
+  console.log(`[claimReferralBonus] newUser exists=${newUserSnap.exists}`);
   if (!newUserSnap.exists) return { ok: false, error: 'player_not_found' };
 
   const newUserData = newUserSnap.data();
