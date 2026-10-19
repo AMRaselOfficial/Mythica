@@ -11,6 +11,7 @@ export default function ReferralPage() {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [selectedTraveler, setSelectedTraveler] = useState(null);
 
   useEffect(() => {
@@ -43,6 +44,18 @@ export default function ReferralPage() {
       await navigator.clipboard.writeText(referralCode);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const copyLink = async () => {
+    if (!referralCode) return;
+    try {
+      const link = `https://mythica.bond/signup?r=${referralCode}`;
+      await navigator.clipboard.writeText(link);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
     } catch {
       /* ignore */
     }
@@ -83,11 +96,16 @@ export default function ReferralPage() {
         >
           {referralCode || '—'}
         </div>
-        <button className="btn btn-primary" onClick={copyCode} disabled={!referralCode}>
-          {copied ? 'Copied!' : 'Copy Code'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn-primary" onClick={copyCode} disabled={!referralCode}>
+            {copied ? 'Copied!' : 'Copy Code'}
+          </button>
+          <button className="btn btn-secondary" onClick={copyLink} disabled={!referralCode}>
+            {copiedLink ? 'Link Copied!' : 'Copy Referral Link'}
+          </button>
+        </div>
         <p style={{ color: 'var(--ink-dim)', fontSize: '0.85rem', marginTop: '0.75rem', marginBottom: 0 }}>
-          Share this code with friends. They enter it when signing up.
+          Share your code or link with friends. They enter the code (or use the link) when signing up.
         </p>
       </div>
 
