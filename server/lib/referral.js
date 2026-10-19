@@ -118,13 +118,35 @@ async function claimReferralBonus(tx, newUid, code, now) {
   if (!referrerUid) return { ok: false, error: 'code_not_found' };
   if (referrerUid === newUid) return { ok: false, error: 'self_referral' };
 
-  // Check new user hasn't already claimed
+  // Get or create new user's player doc.
+  // The client creates the doc async via AuthContext, but the claim can
+  // race ahead of it. If the doc doesn't exist yet, create a minimal one
+  // here - the client will fill in displayName/email/etc. on next load.
+  // This is the root fix for player_not_found on referral claims.
   const newUserRef = db.collection('players').doc(newUid);
-  const newUserSnap = await tx.get(newUserRef);
+  let newUserSnap = await tx.get(newUserRef);
   console.log(`[claimReferralBonus] newUser exists=${newUserSnap.exists}`);
-  if (!newUserSnap.exists) return { ok: false, error: 'player_not_found' };
+  let newUserData;
+  if (!newUserSnap.exists) {
+    console.log(`[claimReferralBonus] creating minimal player doc for ${newUid}`);
+    newUserData = {
+      displayName: 'Wanderer',
+      email: '',
+      petals: 20,
+      level: 1,
+      xp: 0,
+      createdAt: now,
+      updatedAt: now,
+      lastHuntAt: null,
+      musicEnabled: true,
+      sfxEnabled: true,
+      accountStatus: 'active',
+    };
+    tx.set(newUserRef, newUserData);
+  } else {
+    newUserData = newUserSnap.data();
+  }
 
-  const newUserData = newUserSnap.data();
   if (newUserData.referredBy) return { ok: false, error: 'already_claimed' };
   if (newUserData.referralClaimed) return { ok: false, error: 'already_claimed' };
 
