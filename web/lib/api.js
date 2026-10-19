@@ -202,6 +202,7 @@ export const api = {
   mergeWeapon: (itemId) => post('/api/inventory/merge', { itemId }),
   playerMe: () => get('/api/player/me'),
   playerByCode: (code) => get(`/api/players/by-code/${encodeURIComponent(code)}`),
+  playerByUid: (uid) => get(`/api/players/${encodeURIComponent(uid)}`),
   redeem: (code) => post('/api/redeem', { code }),
   events: () => get('/api/events'),
   eventJoin: (id) => post(`/api/events/${encodeURIComponent(id)}/join`, {}),
@@ -219,6 +220,8 @@ export const api = {
   notifRegisterToken: (token) => post('/api/notifications/fcm-token', { token }),
   notifUnregisterToken: (token) => del('/api/notifications/fcm-token', { token }),
   supportRead: (ticketId) => post(`/api/support/${encodeURIComponent(ticketId)}/read`, {}),
+  referralStats: () => get('/api/referral/stats'),
+  referralClaim: (code) => post('/api/referral/claim', { code }),
 };
 
 export function newIdempotencyKey() {
