@@ -70,6 +70,7 @@ function InventoryInner() {
           <button
             key={t}
             className="chip"
+            style={{ height: '44px', minHeight: '44px', display: 'inline-flex', alignItems: 'center' }}
             aria-pressed={typeFilter === t}
             onClick={() => {
               sfx.click();
