@@ -7,21 +7,45 @@ import { sfx, unlockAudio } from '../../lib/audio.js';
 import { Icon } from './icons.js';
 import NotificationBell from './NotificationBell.js';
 
-const LINKS = [
-  { href: '/dashboard', label: 'Dashboard' },
-  { href: '/hunt', label: 'Hunt' },
-  { href: '/inventory', label: 'Inventory' },
-  { href: '/marketplace', label: 'Marketplace' },
-  { href: '/trades', label: 'Trades' },
-  { href: '/agora', label: 'Agora' },
-  { href: '/veyra', label: 'Veyra' },
-  { href: '/events', label: 'Events' },
-  { href: '/leaderboard', label: 'Leaderboard' },
-  { href: '/withdraw', label: 'Withdraw' },
-  { href: '/referral', label: 'Referral' },
-  { href: '/profile', label: 'Profile' },
-  { href: '/support', label: 'Support' },
-  { href: '/settings', label: 'Settings' },
+// Grouped menu: 14 links in 4 labelled groups, so the hamburger panel
+// never becomes one long wall of links. Group order follows how players
+// actually use the game: play first, then earn/trade, then community,
+// then their own account.
+const GROUPS = [
+  {
+    title: 'Play',
+    links: [
+      { href: '/dashboard', label: 'Dashboard', icon: 'gamepad' },
+      { href: '/hunt', label: 'Hunt', icon: 'moon' },
+      { href: '/inventory', label: 'Inventory', icon: 'inventory' },
+    ],
+  },
+  {
+    title: 'Trade & Earn',
+    links: [
+      { href: '/marketplace', label: 'Marketplace', icon: 'shop' },
+      { href: '/trades', label: 'Trades', icon: 'trades' },
+      { href: '/withdraw', label: 'Withdraw', icon: 'marketplace' },
+      { href: '/referral', label: 'Referral', icon: 'gift' },
+    ],
+  },
+  {
+    title: 'Community',
+    links: [
+      { href: '/agora', label: 'Agora', icon: 'agora' },
+      { href: '/veyra', label: 'Veyra', icon: 'mail' },
+      { href: '/events', label: 'Events', icon: 'events' },
+      { href: '/leaderboard', label: 'Leaderboard', icon: 'trophy' },
+    ],
+  },
+  {
+    title: 'You',
+    links: [
+      { href: '/profile', label: 'Profile', icon: 'user' },
+      { href: '/support', label: 'Support', icon: 'help' },
+      { href: '/settings', label: 'Settings', icon: 'settings' },
+    ],
+  },
 ];
 
 export default function Nav() {
@@ -91,22 +115,35 @@ export default function Nav() {
             style={{ display: 'inline-flex' }}
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={menuOpen}
+            aria-controls="main-menu"
             onClick={toggleMenu}
           >
             {menuOpen ? <Icon name="close" /> : <Icon name="menu" />}
           </button>
         )}
         {user && (
-          <div className={`nav-links${menuOpen ? ' open' : ''}`} role="navigation">
-            {LINKS.map((l) => (
-              <a
-                key={l.href}
-                href={link(l.href)}
-                className={isActive(l.href) ? 'active' : ''}
-                onClick={handleLinkClick}
-              >
-                {l.label}
-              </a>
+          <div
+            id="main-menu"
+            className={`nav-links${menuOpen ? ' open' : ''}`}
+            role="navigation"
+            aria-label="Game menu"
+          >
+            {GROUPS.map((g) => (
+              <section className="nav-group" key={g.title} aria-label={g.title}>
+                <h2 className="nav-group-title">{g.title}</h2>
+                {g.links.map((l) => (
+                  <a
+                    key={l.href}
+                    href={link(l.href)}
+                    className={isActive(l.href) ? 'active' : ''}
+                    aria-current={isActive(l.href) ? 'page' : undefined}
+                    onClick={handleLinkClick}
+                  >
+                    <Icon name={l.icon} size="1.1em" />
+                    <span>{l.label}</span>
+                  </a>
+                ))}
+              </section>
             ))}
             <button type="button" className="nav-signout-mobile" onClick={handleLogout}>
               Sign out
