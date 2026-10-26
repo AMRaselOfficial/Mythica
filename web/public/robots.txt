@@ -15,5 +15,7 @@ Disallow: /veyra
 Disallow: /settings
 Disallow: /support
 Disallow: /withdraw
+Disallow: /referral
+Disallow: /reset
 
 Sitemap: https://mythica.bond/sitemap.xml
