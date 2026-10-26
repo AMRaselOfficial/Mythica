@@ -1701,3 +1701,93 @@ input:-webkit-autofill:focus {
 .nav-toggle {
   display: inline-flex !important;
 }
+
+/* ---------- Grouped hamburger menu (2026-10-26) ----------
+   One panel, 4 labelled groups, capped height with its own scroll.
+   This block sits last so it wins over the older flat-menu rules above:
+   on every screen the panel is a dropdown anchored to the header, never
+   a full-page wall of links, and Sign out is inside it at every width. */
+.nav-inner {
+  position: relative;
+}
+.nav-links {
+  display: none !important;
+}
+.nav-links.open {
+  display: block !important;
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 1rem;
+  left: auto;
+  width: min(22.5rem, calc(100vw - 2rem));
+  max-height: min(37.5rem, calc(100dvh - 5rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 0.5rem 0.5rem 0.75rem;
+  box-shadow: var(--shadow);
+  z-index: 100;
+}
+.nav-group-title {
+  margin: 0;
+  padding: 0.65rem 0.65rem 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--gold-dim);
+}
+.nav-group:first-child .nav-group-title {
+  padding-top: 0.35rem;
+}
+.nav-links.open .nav-group a {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  border-radius: 0.6rem;
+}
+.nav-links.open .nav-group a svg {
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+}
+.nav-links.open .nav-group a.active svg {
+  color: var(--gold-soft);
+}
+.nav-links.open .nav-signout-mobile {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.75rem;
+  margin-top: 0.5rem;
+  padding: 0.7rem 0.65rem;
+  font-size: 0.95rem;
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0.6rem;
+  cursor: pointer;
+  text-align: left;
+}
+.nav-links.open .nav-signout-mobile:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.04);
+}
+@media (max-width: 719px) {
+  .nav-links.open {
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    max-height: calc(100dvh - 4.75rem);
+  }
+  .nav-links.open .nav-group a {
+    min-height: 2.75rem;
+    font-size: 1rem;
+  }
+}
