@@ -25,6 +25,16 @@ export const metadata = {
   alternates: {
     canonical: 'https://mythica.bond/',
   },
+  // Favicon + touch icon: these are what browsers and Google Search
+  // show next to the site name. Previously no icon was declared at all.
+  icons: {
+    icon: [
+      { url: 'https://mythica.bond/favicon.ico' },
+      { url: 'https://mythica.bond/favicon.png', type: 'image/png' },
+    ],
+    shortcut: 'https://mythica.bond/favicon.ico',
+    apple: 'https://mythica.bond/apple-touch-icon.png',
+  },
   openGraph: {
     type: 'website',
     url: 'https://mythica.bond/',
@@ -35,9 +45,13 @@ export const metadata = {
     locale: 'en_US',
     images: [
       {
-        url: 'https://mythica.bond/assets/logo/mythica-logo.png',
+        // Real 1200x630 share image (og-image.jpg). The old tag declared
+        // 1200x630 but pointed at the 1024x1024 square logo, so link
+        // previews cropped it badly.
+        url: 'https://mythica.bond/og-image.jpg',
         width: 1200,
         height: 630,
+        type: 'image/jpeg',
         alt: 'Mythica — Dark-Fantasy Collection & Adventure Game',
       },
     ],
@@ -47,7 +61,7 @@ export const metadata = {
     title: 'Mythica — A Dark-Fantasy Collection & Adventure Game',
     description:
       'Hunt the night wilds, collect sprites and weapons, trade with fellow travelers, and rise through the dark fantasy realm of Mythica. Free to play.',
-    images: ['https://mythica.bond/assets/logo/mythica-logo.png'],
+    images: ['https://mythica.bond/og-image.jpg'],
   },
   robots: {
     index: true,
@@ -68,6 +82,7 @@ export const metadata = {
 export const viewport = {
   width: 'device-width',
   initialScale: 1,
+  themeColor: '#0a0d18',
 };
 
 export default function RootLayout({ children }) {
@@ -88,6 +103,7 @@ export default function RootLayout({ children }) {
               gamePlatform: 'Web Browser',
               applicationCategory: 'Game',
               operatingSystem: 'Any',
+              image: 'https://mythica.bond/og-image.jpg',
               offers: {
                 '@type': 'Offer',
                 price: '0',
@@ -97,7 +113,24 @@ export default function RootLayout({ children }) {
                 '@type': 'Organization',
                 name: 'Mythica',
                 url: 'https://mythica.bond/',
+                logo: 'https://mythica.bond/assets/logo/mythica-logo.png',
               },
+            }),
+          }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'Organization',
+              name: 'Mythica',
+              url: 'https://mythica.bond/',
+              description:
+                'Mythica — a free dark-fantasy collection and adventure game for web browsers.',
+              // This logo field is what Google uses for the site logo in
+              // search results. It must be a real, crawlable image URL.
+              logo: 'https://mythica.bond/assets/logo/mythica-logo.png',
             }),
           }}
         />
