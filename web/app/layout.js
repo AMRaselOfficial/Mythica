@@ -131,6 +131,7 @@ export default function RootLayout({ children }) {
               // This logo field is what Google uses for the site logo in
               // search results. It must be a real, crawlable image URL.
               logo: 'https://mythica.bond/assets/logo/mythica-logo.png',
+              sameAs: ['https://www.facebook.com/mythica.bond/'],
             }),
           }}
         />
@@ -139,6 +140,17 @@ export default function RootLayout({ children }) {
           <main>{children}</main>
           <footer className="footer">
             <p>Mythica — an original dark-fantasy tale. All creatures, names, and art are original works.</p>
+            <div className="footer-social">
+              <span>Follow Mythica:</span>
+              <a
+                href="https://www.facebook.com/mythica.bond/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Mythica on Facebook (opens in a new tab)"
+              >
+                Facebook
+              </a>
+            </div>
           </footer>
         </AuthProvider>
       </body>
