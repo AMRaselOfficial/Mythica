@@ -1243,6 +1243,30 @@ textarea.input {
   z-index: 1;
 }
 
+.footer-social {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  color: var(--ink-faint);
+}
+
+.footer-social a {
+  color: var(--gold);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 1rem;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.footer-social a:hover {
+  border-color: var(--gold);
+  background: rgba(232, 179, 75, 0.1);
+}
+
 /* ---------- Responsive: phones & small tablets ---------- */
 
 /* Guard against accidental horizontal scroll (does not break sticky nav). */
