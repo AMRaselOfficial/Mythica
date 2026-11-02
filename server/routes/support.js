@@ -10,6 +10,10 @@
  * Name/email are taken server-side from the player's account document —
  * the client never supplies them. Tickets are server-managed; Firestore
  * rules deny direct client access (see firestore.rules).
+ * If the player document has no email (docs created before the email field
+ * existed, or created by the server), the verified token email is used
+ * instead, and the player document is backfilled — the client cannot write
+ * its own email field under the Firestore rules, so this must happen here.
  *
  * Error codes: bad_title, bad_description, bad_text, not_found, forbidden
  */
@@ -90,11 +94,22 @@ router.post('/support', async (req, res) => {
     }
     if (!ticketId) return res.status(500).json({ ok: false, error: 'internal' });
 
+    // Backfill a missing player-doc email from the verified token email
+    // (best effort — never blocks ticket creation if it fails).
+    const email = player?.email || req.email || '';
+    if (player && !player.email && req.email) {
+      try {
+        await db.collection('players').doc(uid).update({ email: req.email });
+      } catch {
+        /* non-fatal: the ticket below still carries the correct email */
+      }
+    }
+
     const doc = {
       ticketId,
       uid,
       displayName: player?.displayName || '',
-      email: player?.email || '',
+      email,
       title,
       description,
       status: 'pending',
