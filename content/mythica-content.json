@@ -244,7 +244,7 @@
     }
   ],
   "hunt": {
-    "cooldownSec": 60,
+    "cooldownSec": 10,
     "dropChance": 0.65,
     "petalFindChance": 0.25,
     "petalFindMax": 12,
