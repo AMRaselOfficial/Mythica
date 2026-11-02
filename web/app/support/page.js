@@ -40,7 +40,7 @@ export default function SupportPage() {
 }
 
 function SupportInner() {
-  const { player } = useAuth();
+  const { player, user } = useAuth();
   const [tickets, setTickets] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
@@ -153,13 +153,17 @@ function SupportInner() {
               <div className="stat">
                 <div className="label">Your name</div>
                 <div className="value" style={{ fontSize: '1rem' }}>
-                  {player?.displayName || '—'}
+                  {player?.displayName || user?.displayName || '—'}
                 </div>
               </div>
               <div className="stat">
                 <div className="label">Your email</div>
                 <div className="value" style={{ fontSize: '1rem' }}>
-                  {player?.email || '—'}
+                  {/* Player docs created before the email field existed (or by
+                      the server) have no email stored, which used to render
+                      as "—" here. The signed-in account email is the
+                      authoritative fallback, so it always shows. */}
+                  {player?.email || user?.email || '—'}
                 </div>
               </div>
             </div>
