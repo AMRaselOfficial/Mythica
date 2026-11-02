@@ -111,7 +111,7 @@ function DashboardInner() {
           <Icon name="help" /> Support
         </a>
         <a className="btn btn-primary" href={link('/guide')} onClick={() => sfx.click()}>
-          <Icon name="help" /> Player’s Guide
+          <Icon name="scroll" /> Player’s Guide
         </a>
       </div>
 
