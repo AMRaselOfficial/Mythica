@@ -343,6 +343,7 @@ function GuideInner() {
     if (!searching) return CHAPTERS;
     return CHAPTERS.map((c) => ({
       ...c,
+      origIndex: CHAPTERS.indexOf(c),
       score: scoreText(c.title, tokens) * 3 + scoreText(c.body.join(' '), tokens),
     }))
       .filter((c) => c.score >= tokens.length)
@@ -405,21 +406,88 @@ function GuideInner() {
         </p>
       )}
 
-      <h2 className="serif">Index</h2>
-      {matchedChapters.length === 0 ? (
-        <p style={{ color: 'var(--ink-dim)' }}>No chapters match your search.</p>
-      ) : (
-        <ol style={{ columns: '2', columnGap: '2rem', paddingLeft: '1.25rem' }}>
-          {matchedChapters.map((c, i) => (
-            <li key={c.id} style={{ marginBottom: '0.4rem', breakInside: 'avoid' }}>
-              <a href={`#${c.id}`}>{searching ? c.title : `${i + 1}. ${c.title}`}</a>
-            </li>
-          ))}
-          <li style={{ marginBottom: '0.4rem', breakInside: 'avoid' }}>
-            <a href="#faq">Frequently asked questions</a>
-          </li>
-        </ol>
-      )}
+      <section className="card" style={{ padding: '1.25rem 1.25rem 0.5rem', background: 'linear-gradient(160deg, rgba(232, 179, 75, 0.10), rgba(232, 179, 75, 0.02) 55%, transparent)' }}>
+        <h2 className="serif" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Icon name="scroll" /> Index
+        </h2>
+        <p style={{ color: 'var(--ink-dim)', marginTop: 0 }}>
+          Tap a chapter to jump straight to it.
+        </p>
+        {matchedChapters.length === 0 ? (
+          <p style={{ color: 'var(--ink-dim)' }}>No chapters match your search.</p>
+        ) : (
+          <div className="grid-cards" style={{ paddingBottom: '0.75rem' }}>
+            {matchedChapters.map((c) => {
+              const num = (c.origIndex ?? CHAPTERS.indexOf(c)) + 1;
+              return (
+                <a
+                  key={c.id}
+                  href={`#${c.id}`}
+                  onClick={() => sfx.click()}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                    padding: '0.7rem 0.9rem', borderRadius: 'var(--radius)',
+                    border: '1px solid var(--line)', background: 'var(--bg-card)',
+                    color: 'var(--ink)', textDecoration: 'none',
+                  }}
+                >
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      flex: '0 0 auto', width: '2rem', height: '2rem',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: '50%', background: 'var(--gold, #e8b34b)',
+                      color: '#1a1405', fontWeight: 700, fontSize: '0.9rem',
+                    }}
+                  >
+                    {num}
+                  </span>
+                  <span style={{ color: 'var(--gold-soft, #d8b36a)', flex: '0 0 auto' }}>
+                    <Icon name={c.icon} size="1.25em" />
+                  </span>
+                  <span>
+                    <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Chapter {num}
+                    </span>
+                    <span style={{ fontWeight: 600 }}>{c.title}</span>
+                  </span>
+                </a>
+              );
+            })}
+            <a
+              href="#faq"
+              onClick={() => sfx.click()}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.75rem',
+                padding: '0.7rem 0.9rem', borderRadius: 'var(--radius)',
+                border: '1px solid var(--gold, #e8b34b)', background: 'rgba(232, 179, 75, 0.12)',
+                color: 'var(--ink)', textDecoration: 'none',
+              }}
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  flex: '0 0 auto', width: '2rem', height: '2rem',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  borderRadius: '50%', background: 'var(--gold, #e8b34b)',
+                  color: '#1a1405', fontWeight: 700, fontSize: '0.9rem',
+                }}
+              >
+                ?
+              </span>
+              <span style={{ color: 'var(--gold-soft, #d8b36a)', flex: '0 0 auto' }}>
+                <Icon name="help" size="1.25em" />
+              </span>
+              <span>
+                <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--ink-dim)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Quick answers
+                </span>
+                <span style={{ fontWeight: 600 }}>Frequently asked questions</span>
+              </span>
+            </a>
+          </div>
+        )}
+      </section>
 
       {matchedChapters.map((c, i) => (
         <section key={c.id} id={c.id} className="card" style={{ marginTop: '1rem', scrollMarginTop: '5rem' }}>
